@@ -610,7 +610,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_graph_recovery_preserves_health_cause_and_conservative_retrieval() {
+    async fn repeated_failed_rebuilds_keep_original_cause_and_conservative_retrieval() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("stats.sqlite3");
         let cause = stats_failure();
@@ -671,6 +671,14 @@ mod tests {
                 .last_error_cause,
             Some(cause)
         );
+        let recovered =
+            retrieval_stats_store(&sqlite_stats_settings(&path), &in_memory_graph_store())
+                .await
+                .unwrap();
+        assert_eq!(
+            recovered.health().await.unwrap(),
+            RetrievalStatsHealth::default()
+        );
     }
 
     #[tokio::test]
@@ -722,6 +730,151 @@ mod tests {
                 detail: "interrupted projection".to_owned(),
             },
         }
+    }
+
+    #[tokio::test]
+    async fn reopening_failed_statistics_restores_healthy_recall_selection() {
+        use crate::api::types::RetrievalContext;
+        use crate::domain::{Scene, SceneParticipant};
+
+        let directory = tempfile::tempdir().unwrap();
+        let graph_path = directory.path().join("graph");
+        let graph = OxigraphGraphAuthorityStore::new_persistent(&graph_path).unwrap();
+        let fixtures = representative_fixtures();
+        let participant = fixtures.user_entity.id;
+        let mut objects = vec![
+            MemoryObject::Entity(fixtures.user_entity.clone()),
+            MemoryObject::Entity(fixtures.hub_entity.clone()),
+        ];
+        let mut links = Vec::new();
+        for index in 0..48 {
+            let mut episode = fixtures.episode.clone();
+            episode.id = MemoryId::from_u128(10_000 + index);
+            episode.summary = format!("A meeting on day {index}");
+            episode.scene =
+                Scene::at(fixtures.episode.scene.time + chrono::Duration::days(index as i64));
+            episode.scene.participants.push(SceneParticipant {
+                key: Some(if index < 8 {
+                    participant
+                } else {
+                    fixtures.hub_entity.id
+                }),
+                ..Default::default()
+            });
+            let mut link = fixtures.hub_links[0].clone();
+            link.id = MemoryId::from_u128(11_000 + index);
+            link.from_id = episode.scene.participants[0].key.unwrap();
+            link.to_id = episode.id;
+            links.push(link);
+            objects.push(MemoryObject::Episode(episode));
+        }
+        graph
+            .upsert_objects_and_links(&objects, &links)
+            .await
+            .unwrap();
+        let healthy_path = directory.path().join("healthy.sqlite3");
+        let failed_path = directory.path().join("failed.sqlite3");
+        for path in [&healthy_path, &failed_path] {
+            let store = SqliteRetrievalStatsStore::open(path).unwrap();
+            assert!(StatsProjectionService::new(&graph, &store)
+                .project(&objects, &links)
+                .await
+                .causes
+                .is_empty());
+        }
+        drop(graph);
+        let settings_for = |path: &std::path::Path| {
+            Settings::new(
+                ::config::Config::builder()
+                    .set_override("graph_store_mode", "persistent")
+                    .unwrap()
+                    .set_override("oxigraph_path", graph_path.to_str().unwrap())
+                    .unwrap()
+                    .set_override("vector_store_mode", "embedded")
+                    .unwrap()
+                    .set_override(
+                        "vector_store_path",
+                        directory.path().join("vectors").to_str().unwrap(),
+                    )
+                    .unwrap()
+                    .set_override("retrieval_stats_store_mode", "sqlite")
+                    .unwrap()
+                    .set_override("retrieval_stats_path", path.to_str().unwrap())
+                    .unwrap()
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        let mut scene = Scene::at(fixtures.episode.scene.time + chrono::Duration::days(300));
+        scene.participants.push(SceneParticipant {
+            key: Some(participant),
+            ..Default::default()
+        });
+        let mut context = RetrievalContext::default().with_scene(scene).with_trace();
+        context.candidate_limits.max_graph_roots = 1;
+        context.graph_limits.allowed_object_types = vec![ObjectType::Entity, ObjectType::Episode];
+        context.graph_limits.allowed_relation_types = vec![RelationType::Involves];
+        context.graph_limits.max_depth = 1;
+        let mut selections = Vec::new();
+        for (path, fail) in [(&healthy_path, false), (&failed_path, true)] {
+            let memory = CharacterMemory::new_with_embedding_provider(
+                settings_for(path),
+                "recovery-witness".to_owned(),
+                Box::new(MockEmbeddingProvider(3)),
+                MemoryId::from_u128(1),
+            )
+            .await
+            .unwrap();
+            if fail {
+                memory
+                    .memory_composition
+                    .stats_store
+                    .mark_unhealthy(stats_failure())
+                    .await
+                    .unwrap();
+            }
+            let outcome = memory.retrieve(context.clone()).await.unwrap();
+            selections.push(
+                outcome
+                    .pack
+                    .relevant_episodes
+                    .iter()
+                    .map(|episode| episode.id)
+                    .collect::<Vec<_>>(),
+            );
+            memory.close().await.unwrap();
+        }
+        assert_ne!(
+            selections[0], selections[1],
+            "the witness must expose degraded recall before recovery"
+        );
+        let reopened = CharacterMemory::new_with_embedding_provider(
+            settings_for(&failed_path),
+            "recovery-witness".to_owned(),
+            Box::new(MockEmbeddingProvider(3)),
+            MemoryId::from_u128(1),
+        )
+        .await
+        .unwrap();
+        let recovered = reopened.retrieve(context).await.unwrap();
+        let recovered_ids = recovered
+            .pack
+            .relevant_episodes
+            .iter()
+            .map(|episode| episode.id)
+            .collect::<Vec<_>>();
+        assert_eq!(recovered_ids, selections[0]);
+        assert_eq!(
+            reopened
+                .memory_composition
+                .stats_store
+                .health()
+                .await
+                .unwrap(),
+            RetrievalStatsHealth::default()
+        );
+        reopened.close().await.unwrap();
     }
 
     struct MockEmbeddingProvider(usize);
