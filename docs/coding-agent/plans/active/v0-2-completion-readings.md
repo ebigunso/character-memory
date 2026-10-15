@@ -92,3 +92,4 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
 ## Findings
 
 - 2026-10-16, situated recall plan: the walk's cursor, used as a cut situation's continuation, has no key for a situation anchored on an unsettled matter or a topic, so for those anchors "offers to continue" reaches nothing. Reading: bears on the design (the character experiences an empty offer). Escalated to Counsel as a value question on 2026-10-16; the continuation for matter- and topic-anchored situations is held until the owner answers.
+  - 2026-10-16: Counsel returned the question as below the owner's level and clarified 4a; the hold is released; the finding is closed by the brief's clarified text.
