@@ -1,4 +1,4 @@
-# Plan: three logged residuals of the v0.2 recall slices are fixed, each with its measurement
+# Plan: a character whose recall statistics once failed recovers without an operator
 
 - status: in-progress
 - generated: 2026-10-15
@@ -6,76 +6,40 @@
 - work_type: code
 
 ## Goal
-- Close three residuals that the v0.2 slices logged and did not fix, chosen by the decider on 2026-10-15 (ruling 81; a fourth, the second person under activity pressure, was dropped on its root cause): a character with a long history of beliefs about one person recalls them as fast as it recalls its promises; a character whose recall statistics once failed recovers without an operator; and what a busy occasion brings does not depend on how its identifiers happen to sort.
+- Close the statistics residual the v0.2 slices logged: a recall-statistics store marked unhealthy stays conservative forever today, so one transient failure makes every later recall of that character conservative across restarts. The other two residuals of this plan (the subject-state read's speed and the busy-occasion order) moved to the plan for the brief's design amendment (section 4a), which replaces the recall selection they rest on; their root causes travel with them.
 
 ## Definition of Done
-- The subject-state read selects exactly what it selects at the base, and at 2,000 beliefs about one person it takes no longer than the same order of time as the trigger and due reads at that size (about 0.15 s on this machine, against about 9 s at the base). The bound stays in Rust.
 - A recall-statistics store marked unhealthy becomes healthy again without operator action and without a new public call: the next time the store is opened, its statistics are rebuilt from the graph store and the marker clears. A rebuild that fails leaves the marker in place with its original cause. What retrieval selects with healthy statistics is unchanged.
-- Busy-occasion selection keeps the current, salient, then newest observations of an occasion, and gives the same result in both identifier orders.
-- Measurement, per the checkpoint rule: Task_1 carries its timing witness at scale and Task_2 its red/green recovery witness; when Wave 1 closes, evals-worker runs Task_1's and Task_2's control families at its tip, and the busy-occasion family runs when Task_3 is released. Before and after numbers, a paragraph on what they mean for the character and a verdict go in this plan's Decision Log. The plan is not complete until they exist.
+- Measurement, per the checkpoint rule: the red/green recovery witness, before and after, and evals-worker's scene and keyless families as controls at the task's tip. Before and after numbers, a paragraph on what they mean for the character and a verdict go in this plan's Decision Log. The plan is not complete until they exist.
 
 ## Planner-added requirements
-- Task_1's falsifier of 1 s at 2,000 beliefs: the decider named the residual "Slow subject-state read"; the plan reads slow against the trigger and due reads at the same size (about 0.15 s), and 1 s is the line below which a person-heavy store no longer stalls a turn, with room for machine noise.
-- The bound stays in Rust (Task_1, DoD): pushing the bound into the query was measured about 220 times slower when the state reads were built; that measurement, not the ruling that recorded it, is the reason.
-- Task_1's batched membership read (Design): the only form measured fast with equal rows; caps run once over all batches because per-batch caps would select differently.
-- Task_2's rebuild at open (DoD): the one place that already decides the store's health state, and needs no new call.
-- Task_2's failed rebuild keeps the marker and its original cause: the lesson of 2026-07-22 (stats failures retain every observed cause) as far as the stored health shape allows; the limit is in the Design.
-- Task_1's timing samples, before and after, interleaved, run twice (`orchestrator.md` measurement rule).
-- Task_3's one key for the pre-hydration path and the materialized plan: two orders would select different observations for the same store.
-- Task_1's timing witness stays outside the permanent suite: a timing assertion in CI is flaky across machines; the equality witness is what the suite keeps.
-- Task_2 adds no public call or setting: an application cannot know when to call one, and a character should not need an operator to recover.
-- Task_2's witness must change selection at the base: a witness that selects the same either way proves nothing about recovery.
-- Task_3's tie key (current, salient, newest, id): the residual names only identifier dependence; the key is the planner's because removing the dependence needs some meaningful order, and rulings 65 and 70 give it.
+- The rebuild at open (DoD): the one place that already decides the store's health state, and needs no new call.
+- A failed rebuild keeps the marker and its original cause: the lesson of 2026-07-22 (stats failures retain every observed cause) as far as the stored health shape allows; the limit is in the Design.
+- No public call or setting: an application cannot know when to call one, and a character should not need an operator to recover.
+- The witness must change selection at the base: a witness that selects the same either way proves nothing about recovery.
 
 ## Scope / Non-goals
-- Scope: the three fixes, their tests and witnesses, their measurements, and this plan.
-- Non-goals: the unlived-topic relevance floor (needs real embeddings; ADR-I-0036); the reserved root seat's subtree cost; the LoCoMo `question_id`; the ADR-I-0007 constants; any new public API; any change to what retrieval selects beyond the residual each task names.
+- Scope: the statistics recovery, its tests and witness, its measurement, and this plan.
+- Non-goals: the subject-state read's speed and the busy-occasion order (moved to the section 4a design plan); any change to what retrieval selects with healthy statistics; any new public API; any stored-shape change.
 
 ## Design
-- Each task's root cause is recorded in its report and the Decision Log. If the fix needs a contract change, a new public surface, a stored-shape change or a ruling that is not in this plan, the worker stops and reports instead of working around it (workaround tripwire).
-- Task_1 (subject-state read): all four state reads go through `select_state` (`src/adapters/oxigraph/sparql_selectors.rs:433`), which reads compact rank rows and applies lifecycle policy, order and caps in Rust (538-602). Subject state hands it one VALUES table of every member (294-310). Root cause, measured: the large membership table in that metadata query is the expensive boundary (one 2,000-row table 8.45 s; the same members in 32 tables of at most 64 rows, 0.18 s, identical raw rows).
-  - Chosen: read the compact rows in member batches of at most 64, collect every batch's rows, then apply lifecycle aggregation, order and caps once over the whole set; the bound stays in Rust. Queries grow as members/64 (about 313 at 20,000 members), each small. Instrument: the timing witness at 2,000 beliefs; falsifier: any selected belief, order or trace entry differs, or the after time is above 1 s. Structure: one selector changes, no port, shape or dependency change. Evolution: a batch constant, removable if the engine stops being size-sensitive. Verification: the equality witness in both identifier orders pins the contract. Operation: linear in members, no full-store scan. Human: the batch size is named with the measurement that set it. Safety: none.
-  - Alternative: a joinable scope pattern (direct relation predicate, reified membership subquery, flat reified membership), measured at 9.7 s, 23 s and 32 s with identical rows. Same structure and verification; operation no better or worse. Rejected on the measurement.
-  - Alternative: drop the scope from the query and filter members in Rust. Operation: cost grows with every state memory in the store, not the subject's, and it is unmeasured. Rejected.
-  - Alternative: `select_state` called once per batch. Per-batch caps would select differently. Rejected.
-- Task_2 (statistics recovery): the statistics are derived from the graph, so they can be recomputed from it. The chosen recovery is a rebuild at open when the stored marker is unhealthy, in the composition path that already chooses the in-memory unhealthy fallback (`src/composition.rs` near 309). No new public call, because no application can know when to call it and a character should not need an operator to recover. Known limit: a long-running process whose store fails mid-session stays conservative until it next opens the store. Retrying after the next successful projection was deferred: it adds a rebuild on a hot write path for a failure not seen outside tests; the slice-end verdict judges whether that holds. Second known limit: the stored health keeps one cause (`RetrievalStatsHealth::last_error_cause`), so a rebuild that fails at open leaves the original cause and its own failure is not stored; storing both would change the persisted health shape, which this plan excludes, and the rebuild is retried at the next open. Instrument: the red/green witness; falsifier: the reopened store selects differently from a never-failed store. Lens: structure, the rebuild reuses the graph's own conversion with two filters removed; evolution, no new call or setting to retire; verification, the witness and a failed-rebuild test; operation, a rebuild cost only at an unhealthy open; human, an unhealthy store heals at open without anyone acting; safety, none.
-- Task_3 (busy-occasion order): which observations of one occasion survive the fanout bound is decided by the link identifier order today (`select_links_touching` sorts refs by id, and `apply_fanout_limits_by_pair` keeps the first 16). The chosen key orders an occasion's eligible observation neighbours before the bound: current first under the lifecycle policy (a suppressed or superseded observation takes no seat), then salient, then newest by memory time (the observation's own time, else its occasion's scene time, as `ParticipantOccasion::memory_time` defines), then identifier as the last resort. It is ruling 70's order (salient current first, then newest, then id) for what is held about a present person, applied to what was observed at an occasion, and ruling 65's rule of ordering before a bound the way the section will judge (observations of one occasion tie on graph and cue score), so a character recalls the striking details of a busy occasion and, among equals, the latest. The same key orders both the pre-hydration path and the materialized plan. The order comes from the occasion metadata the adapter already reads for every episode and observation neighbour in one batched query per hop (`select_participant_occasions`, `sparql_selectors.rs:792`, called from `shared.rs:676-689`): it gains a salience column, `ParticipantOccasion` (`src/policy/graph_expansion.rs:71`) gains the field beside its retention and `memory_time`, and the policy orders by its own short comparator (`select_state`'s comparator sits in Task_1's function, so the key exists twice, about six lines each, until a later change merges them); never from hydrating every candidate. Instrument: the busy-occasion residual family, both identifier orders; falsifier: the orders still differ, or at equal salience the kept set is not the 16 newest. Lens: structure, one existing read gains a column and no new query; evolution, a second short ordering rule beside `select_state`'s; verification, a policy-boundary test in both identifier orders; operation, no added query on the expansion path; human, the key reads as the rule it states; safety, none. Alternative: reuse `select_state` scoped to the occasion's observations, a second read per occasion on every expansion and a dependency on Task_1; rejected for that cost. Rejected: a general key for every relation (changes recall far beyond this route); sorting after hydration or at the pack (the discarded observations were never read); raising the bound (moves the cliff); time before salience (minutes within one occasion say less than salience about what a person keeps).
+- The root cause is recorded in its report and the Decision Log. If the fix needs a contract change, a new public surface, a stored-shape change or a ruling that is not in this plan, the worker stops and reports instead of working around it (workaround tripwire).
+- Chosen: the statistics are derived from the graph, so they can be recomputed from it. The store rebuilds at open when the stored marker is unhealthy, in the composition path that already chooses the in-memory unhealthy fallback (`src/composition.rs` near 309). No new public call, because no application can know when to call it and a character should not need an operator to recover. Known limit: a long-running process whose store fails mid-session stays conservative until it next opens the store. Retrying after the next successful projection was deferred: it adds a rebuild on a hot write path for a failure not seen outside tests; the measurement verdict judges whether that holds. Second known limit: the stored health keeps one cause (`RetrievalStatsHealth::last_error_cause`), so a rebuild that fails at open leaves the original cause and its own failure is not stored; storing both would change the persisted health shape, which this plan excludes, and the rebuild is retried at the next open. Instrument: the red/green witness; falsifier: the reopened store selects differently from a never-failed store. Lens: structure, the rebuild reuses the graph's own conversion with two filters removed; evolution, no new call or setting to retire; verification, the witness and a failed-rebuild test; operation, a rebuild cost only at an unhealthy open; human, an unhealthy store heals at open without anyone acting; safety, none.
+- Alternative: retry the rebuild after the next successful projection, mid-session. Operation: a rebuild on the write path; verification: a mid-session failure test. Rejected for now, as above.
+- Alternative: a public repair call. Evolution: a call to keep and document; human: someone must know to call it. Rejected.
 
 ## Integration
-- Base: the renderer plan tip `969faad7` (merged in at `53a301ff`), which carries the whole library stack through the prospective slice, the governing brief and the ratified philosophy. The task branches cut from `31dc6923` are joined by plain merges. The renderer's tasks touch no retrieval code, so the two lines run in parallel and are joined by plain merges before the closeout re-baseline.
-- Tasks 1 and 2 run in parallel; Task_3 touches different functions of the same files and joins by plain merge when released.
-- After this plan, the evals Task_6 re-baseline runs once on the finished library; under the brief's section 4 the re-baseline waits for the design amendment.
+- Base: the renderer plan tip, merged into this branch, which carries the whole library stack through the prospective slice, the governing brief with its amendment and the ratified philosophy. The task branch `feature/2026-10-15/residual-stats-recovery` (WIP `d45bad71`, cut from `31dc6923`) joins by plain merge.
+- The section 4a design plan replaces the recall selection on a sibling line; this change touches the statistics store, composition and the graph hydrator, not selection.
 
 ## Context
-- Governing brief: `docs/coding-agent/briefs/active/v0-2-completion-brief.md`. Its ratification reached this session as Counsel's relay of the owner's words of 2026-10-16, "I ratify docs/coding-agent/briefs/active/v0-2-completion-brief.md on those five framings.", admitted by the owner in this session on 2026-10-16: "Take the seat again, and check your inbox history. You should have a message from the Counsel, which carries my word. Take the quotes as mine." Product philosophy: `docs/project_philosophy.md`, ratification in `docs/project_philosophy-companion.md`. Readings file: `docs/coding-agent/plans/active/v0-2-completion-readings.md`. Run record: `docs/coding-agent/plans/active/v0-2-completion-run.md`.
-- The brief's section 4: "the subject-state read's speed, statistics recovery" proceed; "the busy-occasion ordering fix" waits for the amendment carrying the v0.2 design re-examination.
+- Governing brief: `docs/coding-agent/briefs/active/v0-2-completion-brief.md`, with its amendment, section 4a. The brief's ratification reached this session as Counsel's relay of the owner's words of 2026-10-16, "I ratify docs/coding-agent/briefs/active/v0-2-completion-brief.md on those five framings.", admitted by the owner in this session on 2026-10-16: "Take the seat again, and check your inbox history. You should have a message from the Counsel, which carries my word. Take the quotes as mine." The amendment's ratification reached this session as Counsel's relay of the owner's words of 2026-10-16, "I ratify the design amendment, section 4a of docs/coding-agent/briefs/active/v0-2-completion-brief.md, on those seven framings.", admitted by the owner's statement in this session on 2026-10-16 admitting Counsel's relays standing (choosing "Admit relays, standing" when asked how the session should treat Counsel's relays). Product philosophy: `docs/project_philosophy.md`, ratification in `docs/project_philosophy-companion.md`. Readings file: `docs/coding-agent/plans/active/v0-2-completion-readings.md`. Run record: `docs/coding-agent/plans/active/v0-2-completion-run.md`.
+- The amendment leaves standing "the storage and schema work"; statistics recovery is storage health under that.
 
 ## Tasks
 
-### Task_1: A long history of beliefs about one person is read as fast as promises are
-- type: impl
-- owns: src/adapters/oxigraph/sparql_selectors.rs (`select_subject_state` and `select_state` only) and its tests
-- depends_on: []
-- acceptance:
-  - The root cause, stated with the query before and after.
-  - At the base and the tip, the same store gives the same selected beliefs, in the same order, and the same filtered and trace list, in both identifier orders.
-  - A timing witness outside the permanent suite at 2,000 beliefs about one person, before and after, interleaved, run twice.
-  - Existing tests pass unchanged.
-- validation:
-  - kind: command
-    required: true
-    owner: worker
-    detail: "cargo fmt --check; cargo clippy --all-targets -- -D warnings; cargo test; the equality and timing witnesses"
-  - kind: review
-    required: true
-    owner: reviewer
-    detail: "Tier D: the result is identical, the bound stays in Rust, checked at scale against the base form; the witness is not in the suite"
-  - kind: command
-    required: true
-    owner: orchestrator
-    detail: "Measurement: the timing witness before and after at 2,000 beliefs (instrument); evals-worker runs the familiar-person and state families as controls at the Wave 1 tip. Falsified if any selected belief differs or the after time at 2,000 beliefs is above 1 s."
-
-### Task_2: A character whose recall statistics failed recovers on its own
+### Task_1: A character whose recall statistics failed recovers on its own
+- note: numbered Task_2 in the root-cause records, messages and earlier revisions of this plan.
 - type: impl
 - owns: src/composition.rs, src/adapters/stats/sqlite.rs, src/adapters/oxigraph/shared.rs (the two MemoryLink exclusions in the object hydrator only), src/adapters/oxigraph/tests.rs, and their tests
 - depends_on: []
@@ -91,46 +55,65 @@
   - kind: review
     required: true
     owner: reviewer
-    detail: "Tier D: no new public surface, the rebuild is from the graph, a failed rebuild keeps the marker, healthy behavior unchanged"
+    detail: "Tier D: no new public surface, the rebuild is from the graph, a failed rebuild keeps the marker, healthy behavior unchanged; the hydrator's callers surveyed for any visible change"
   - kind: command
     required: true
     owner: orchestrator
-    detail: "Measurement: the red/green witness above is the instrument (at the base the reopened store selects differently from a healthy one; at the tip identically); evals-worker runs the scene and keyless families as controls at the Wave 1 tip. Falsified if the reopened store selects differently from a never-failed store."
-
-### Task_3: What a busy occasion brings does not depend on identifier order
-- note: numbered Task_4 in the root-cause records and messages of 2026-10-15; the dropped second-person task held the number 3.
-- type: impl
-- owns: src/policy/graph_expansion.rs (`ParticipantOccasion`, the shared comparator, incident-neighbour ordering before the fanout limits, both paths); src/adapters/oxigraph/shared.rs (the occasion metadata handed to that ordering; not Task_2's hydrator lines); src/adapters/oxigraph/sparql_selectors.rs (`select_participant_occasions` only); their tests
-- depends_on: []
-- acceptance:
-  - The family that showed the dependence (the companion's busy-occasion residual, `calibrate_cue_floors --residuals-only`) selects the same observations in both identifier orders, and with equal salience they are the 16 newest.
-  - A test at the policy or adapter boundary shows the selected observation times in both identifier orders with the caps unchanged, plus a salient older observation that survives over newer equals and a suppressed one that takes no seat.
-- validation:
-  - kind: command
-    required: true
-    owner: worker
-    detail: "cargo fmt --check; cargo clippy --all-targets -- -D warnings; cargo test"
-  - kind: review
-    required: true
-    owner: reviewer
-    detail: "Tier D: the tie key carries meaning and identifier order is the last resort"
-  - kind: command
-    required: true
-    owner: orchestrator
-    detail: "Slice-end measurement at the final tip, run by evals-worker: the busy-occasion residual family before and after, both id orders, twice; controls: the other three residual families and the scene and familiar-person families match the base, or each difference is listed as intended (this order also decides admission under the node cap). Falsified if the two orders still differ, or if at equal salience the kept set is not the 16 newest."
+    detail: "Measurement: the red/green witness above is the instrument (at the base the reopened store selects differently from a healthy one; at the tip identically); evals-worker runs the scene and keyless families as controls at the task's tip. Falsified if the reopened store selects differently from a never-failed store."
 
 ## Task Waves (explicit parallel dispatch sets)
-- Wave 1: [Task_1, Task_2]
-- Wave 2: [Task_3]
-
-The busy-occasion task is held under the brief's section 4 until the design amendment says whether its key stands. The second-person task was dropped on 2026-10-15.
+- Wave 1: [Task_1]
 
 ## Research
-- Root-cause reports, one per task, folded into the Design and the Decision Log: Task_1 `.worktrees/residual-state-read/.agent-work/worker/residual-state-read-rootcause.md`; Task_2 `.agent-work/worker/residual-stats-recovery-rootcause.md`; Task_3 `.agent-work/worker/residual-busy-occasion-rootcause.md`. Each task's `owns` is narrowed from its report.
+- Root-cause report: `.agent-work/worker/residual-stats-recovery-rootcause.md`, folded into the Design and the Decision Log. The moved tasks' reports (`.worktrees/residual-state-read/.agent-work/worker/residual-state-read-rootcause.md`, `.agent-work/worker/residual-busy-occasion-rootcause.md`) go to the section 4a design plan.
 
 ## Progress Log (append-only)
 - 2026-10-15: plan written; Wave 1 dispatched for the root-cause step before the plan review had run (a missed gate). Workers hold after the root cause until the plan review closes and their owns are narrowed.
 - 2026-10-16: the v0.2 completion brief governs this plan from revision `785391cf` (the brief and the ratified philosophy, merged into this branch at `53a301ff`).
+- 2026-10-16: plan-draft value audit dispatched at `4a1fe068` (plan at af3f048a), text verbatim: "You are the value auditor. Read references/value-audit-mandate.md of the orchestration-harness skill and follow it exactly. Position: plan draft. Plan: docs/coding-agent/plans/active/v0-2-residuals-plan.md. Governing brief: docs/coding-agent/briefs/active/v0-2-completion-brief.md. Changes since: none."
+- 2026-10-16: verdict as returned (its two comparison lines are in the readings file):
+  - Position: plan draft
+  - Documents read: the brief, `docs/project_philosophy.md` (by the pointer line), its companion, `docs/coding-agent/rules/common.md` (no Standing Approvals section, so no standing approval in effect), the plan; code read only to understand Task_2's hydrator change (`shared.rs`, `embedded.rs`, `write_planning.rs`, `correct_forget.rs`, `stats_projection.rs`); the notes not opened; the readings file opened once after grading.
+  - Product basis: the philosophy (companion, "Version ratified 2026-10-16 (second, current)") and the brief in the product owner's words (brief section 8).
+  - Not audited: the engineering side has no document.
+  - Missing inputs: none
+  - Value documents changed in range: none (plan draft, no range)
+  - DoD 1, subject-state read selects the same and is fast at 2,000 beliefs | maps to the brief | cited | brief section 4: "work that does not (the subject-state read's speed, statistics recovery, ...) proceeds" (tagged inferred, ratified with the brief on the framing "what waits on the design amendment and what proceeds"); "the bound stays in Rust" is internal mechanics | -
+  - DoD 2, an unhealthy statistics store heals at the next open, with no new call; a failed rebuild keeps the marker | maps to the brief | cited | brief section 4: "statistics recovery ... proceeds" | -
+  - DoD 3, busy-occasion selection keeps current, salient, then newest, the same in both identifier orders | maps to the brief | ask-now | brief section 4: "work that builds on the choices under review (... the busy-occasion ordering fix ...) waits"; brief preamble: "The v0.2 design itself ... is under re-examination ... and is not settled by this brief"; brief section 1: the logged decisions are "not grounds for anything until the re-examination says which choices stand" | Reasons: the brief withholds this decision for the amendment; the key's stated grounds (rulings 65 and 70) are logged decisions the brief says are not grounds; philosophy 8.5 and 7.3 lean toward the key but cannot settle what the brief reserves; the plan already holds this under section 4, so the grade adds no stop beyond the brief's own. Value question: when a character was at an occasion where it noticed more than it will have in mind at once, which of those details should come to mind (the most striking first, then the most recent), or should the re-examination change how much of a busy occasion comes to mind at all? | -
+  - DoD 4, measurement at the Wave 1 tip, busy-occasion family on release | internal mechanics | not audited | - | -
+  - Planner-added: Task_1's 1 s falsifier at 2,000 beliefs | maps to the brief | inferred | extends brief section 4, "the subject-state read's speed" (the line at which a turn no longer stalls is user-observable latency) | -
+  - Planner-added: the bound stays in Rust | internal mechanics | not audited | - | -
+  - Planner-added: batched membership read | internal mechanics | not audited | - | -
+  - Planner-added: Task_2 rebuilds at open | maps to the brief | cited | brief section 4: "statistics recovery ... proceeds" | -
+  - Planner-added: a failed rebuild keeps the marker and its original cause (with the Design's one-cause limit) | maps to the brief | inferred | extends philosophy 8.6, "Expose retrieval rationale", and section 10, "If a memory stops influencing behavior, someone decided that, and the decision is visible" | -
+  - Planner-added: timing samples interleaved, run twice | internal mechanics | not audited | - | -
+  - Planner-added: Task_3 uses one key for the pre-hydration path and the materialized plan | maps to the brief | ask-now | as DoD 3 | Same reasons and value question as DoD 3 | -
+  - Planner-added: Task_1's timing witness stays outside the suite | internal mechanics | not audited | - | -
+  - Planner-added: Task_2 adds no public call or setting | maps to the brief | inferred | extends brief section 4, "statistics recovery", and philosophy section 9, "The library should feel like a memory system, not a database client" | -
+  - Planner-added: Task_2's witness must change selection at the base | internal mechanics | not audited | - | -
+  - Planner-added: Task_3's tie key (current, salient, newest, id) | maps to the brief | ask-now | as DoD 3 | Same reasons and value question as DoD 3 | -
+  - Assumption (Design, Task_2): a store that fails mid-session stays conservative until its next open; retry-after-projection is deferred | maps to the brief | inferred | extends brief section 4, "statistics recovery" (recovery at open is a partial reading of it; cheap to undo) | -
+  - Scope and non-goals | maps to the brief | cited | brief preamble: "The v0.2 design itself (the routes, the floors, the fixed room ...) is under re-examination ... not settled by this brief"; section 4; the scope's busy-occasion part is graded under Task_3 | -
+  - Integration: the evals re-baseline waits for the design amendment; task branches join the plan branch by plain merges | maps to the brief / internal mechanics | cited (re-baseline) / not audited (merges) | brief section 4: "the evals re-baseline ... waits"; the merges are into the run's own plan branch, not outward-facing | -
+  - Task_1 | maps to the brief | cited | brief section 4, "the subject-state read's speed" | -
+  - Task_2 | maps to the brief | cited | brief section 4, "statistics recovery" | -
+  - Task_3 | maps to the brief | ask-now | as DoD 3 | Same reasons and value question as DoD 3 | -
+  - Decision Log 2026-10-15, the decider chose the residuals; one plan | maps to the brief | cited | brief section 4 for Task_1 and Task_2 (ruling 81 is not support, per brief section 1); one plan rather than several is internal mechanics | -
+  - Decision Log 2026-10-15, "plan approval is waived under the standing authorization" | maps to the brief | ask-now | none: common.md at HEAD has no Standing Approvals section, and a standing approval never discharges plan approval | Reason: it would loosen who decides (plan approval) with nothing in the documents covering it; this is the Orchestrator's own line and can be dropped or redone, for example by stating the plan's authority as the brief route only. Value question: now that the completion brief governs the rest of v0.2, does your earlier waiver of plan approval still let work on this plan start without your approval? | -
+  - Decision Log 2026-10-15, Task_2 root cause; delete the hydrator's two link exclusions | internal mechanics | not audited | - | no observable change found; the full caller survey is assigned to the Reviewer | -
+  - Decision Log 2026-10-15, Task_4 (now Task_3) root cause and key | maps to the brief | ask-now | as DoD 3 (the key part) | Same reasons and value question as DoD 3 | -
+  - Decision Log 2026-10-15, drop the second-person residual | maps to the brief | cited | brief section 4: the residual is not among the work that "proceeds"; preamble: "the fixed room ... is under re-examination"; the entry's reading that the seat round "is correct" is not settled by any document | -
+  - Decision Log 2026-10-15, the first plan review applied | maps to the brief / internal mechanics | ask-now (its Task_4 key part only); the rest not audited | as DoD 3 | Same reasons and value question as DoD 3 | -
+  - Decision Log 2026-10-16, the plan runs under the brief; Task_1 and Task_2 proceed; busy-occasion held | maps to the brief | cited | brief section 4 | -
+  - Decision Log 2026-10-16, Task_1 root cause and design | internal mechanics | not audited | - | -
+  - Decision Log 2026-10-16, re-review of 7bf694ff applied | maps to the brief / internal mechanics | ask-now (its Task_3 design part); the rest not audited | as DoD 3 | Same reasons and value question as DoD 3 | -
+  - Decision Log 2026-10-16, second re-review applied | internal mechanics | not audited | - | -
+  - Human-only conditions pending: brief section 2, "Human-only: the owner accepts the revised catalog."; brief section 3, "Human-only: the owner accepts the revised roadmap sections." Neither is touched by this plan.
+  - Scenarios: none
+- 2026-10-16: inferred calls noted: Task_1's 1 s falsifier; the failed rebuild keeping marker and original cause; Task_2 adds no public call; Task_2's mid-session limit.
+- 2026-10-16: the amendment landed (brief section 4a, committed at `a9e0daac`, merged here); Counsel's relays are admitted standing by the owner in this session. This plan is narrowed to the statistics recovery and is audited again as a revision.
+
 
 ## Decision Log (append-only)
 - 2026-10-15 Decision: the decider chose these four residuals for v0.2 (ruling 81) and asked for them to run while Codex capacity is available. One plan with four tasks, not four plans: each task is small, and they share one base and one measurement pattern.
@@ -156,3 +139,9 @@ The busy-occasion task is held under the brief's section 4 until the design amen
 - 2026-10-16 Decision: Task_1's root cause and design, from its report. One VALUES table of every member makes the metadata query slow (8.45 s at 2,000); 32 tables of at most 64 rows return identical rows in 0.18 s; the joinable scope variants were measured no faster (9.7 s to 32 s). Chosen: batched membership, one global lifecycle, order and cap pass, the bound in Rust; `owns` narrowed to the two selectors.
 - 2026-10-16 Decision: the re-review of 7bf694ff (CHANGES REQUESTED) applied: Task_1's design above; the planner-added list completed and the falsifier reason put in the decider's words; per-task lens lines; Task_3 takes the smaller design (a salience column on the occasion metadata read, one comparator), drops its dependency on Task_1 and narrows its `owns`; Task_2 records the one-cause limit and tests a repeated failure; measurement runs at the Wave 1 tip for Tasks 1 and 2 and names evals-worker; counts say three.
 - 2026-10-16 Decision: the second re-review (24d13fb7) APPROVED with two minor findings, applied: Task_3 writes its own comparator (the shared one sits in Task_1's function), and every task states all six lens groups.
+- 2026-10-16 Decision: the plan narrows to the statistics recovery under the brief's amendment (section 4a).
+  - The amendment replaces "the recall selection and room"; the subject-state read (Task_1) rests on `select_state`'s selection and the busy-occasion order (Task_3) on graph expansion's selection, so both move to the section 4a design plan with their root causes, which decides what of them survives. The verdict's ask-now items on the busy-occasion key leave this plan with that task.
+  - Statistics recovery is storage health, which the amendment leaves standing; it is renumbered Task_1.
+  - Correction to the 2026-10-15 entry "plan approval is waived under the standing authorization": that waiver does not authorize this plan. Its authority is the governing brief: a plan-draft value audit after the plan review that holds nothing, under the owner's ratification of the brief.
+  - User approval: the brief and its amendment, the owner's ratified words.
+  - Record proposed: none.
