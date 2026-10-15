@@ -71,4 +71,9 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
 - Orchestrator rulings: the plan narrowed under 4a; the one-cause limit accepted; the waiver line corrected | covered | brief sections 1, 4, 4a.
 - Human-only items: none for this unit.
 
+- Verdict comparison for the residuals plan, closeout (2026-10-16), as returned:
+  - Reading compared: rebuild at open agrees; hydrator exclusions agrees; failed rebuild keeps cause agrees (extends / inferred); documentation agrees; measurement verdict agrees; judgement calls agree; the rulings line diverges on two parts (the subject-state read's move: covered against inferred; the one-cause limit: covered against inferred), the waiver correction agrees; human-only items agree. Unread under the closeout heading: the Standing Approvals entry and Counsel line; the renderer supersession ruling; the PRs opened; the healthy-reopen item; the sqlite rebuild's delete-and-rewrite; the mid-session limit; the go for Task_1; the run record; lessons.
+  - Findings compared: none found.
+  - Correction inside the run: the two parts read as covered are read as extending in later readings.
+
 ## Findings

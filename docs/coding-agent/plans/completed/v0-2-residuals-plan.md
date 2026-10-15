@@ -1,6 +1,6 @@
 # Plan: a character whose recall statistics once failed recovers without an operator
 
-- status: in-progress
+- status: done
 - generated: 2026-10-15
 - last_updated: 2026-10-16
 - work_type: code
@@ -144,6 +144,41 @@
 - 2026-10-16: the narrowed plan goes to a plan re-review (the Plan Gate's second source needs one closed after the revision); go for Task_1 follows it.
 
 - 2026-10-16: Task_1 built (38b7e702; docs follow-up afb97202 after the reviewer's R1 P2 on README and the database design documents, two consistency touches outside owns accepted). Worker gates pass (532 tests); witness base healthy 4 / degraded 1 / reopened 1 unhealthy, tip 4 / 1 / 4 healthy, same ids and order, replayed twice. Tier D APPROVED through afb97202 (`.agent-work/reviewer/residual-stats-recovery-review.md`). Judgement calls: the expectation change in `oxigraph_queries_links_separately_from_memory_objects` (a query asking for a link now gets it). Pending: evals-worker's scene and keyless controls at the tip, then the measurement verdict, then the closeout audit. Pull requests opened: the plan on #144's branch, the task on the plan branch.
+
+- 2026-10-16 (record correction, appended): the plan re-review of the narrowed revision returned APPROVED at a06c4a11 (two nits, applied) before the go for Task_1 was sent; the entry above that said the re-review was pending was written before the verdict arrived.
+- 2026-10-16: closeout value audit dispatched at `763df84b`, text verbatim (paths repository-relative for the committed record): "You are the value auditor. Read references/value-audit-mandate.md of the orchestration-harness skill and follow it exactly. Position: closeout. Plan: docs/coding-agent/plans/active/v0-2-residuals-plan.md. Governing brief: docs/coding-agent/briefs/active/v0-2-completion-brief.md. Changes since: 785391cf."
+- 2026-10-16: verdict as returned (comparison lines in the readings file). Position: closeout. Documents read: the plan whole as claims; the brief whole and its diff in range; common.md at HEAD (pointer line; Standing Approvals entry carrying the owner's acceptance); the philosophy; its companion; the run record's Scenarios; the range diffs of README, lessons, the renderer plan, the three database design documents, composition.rs, adapters/stats/sqlite.rs, adapters/oxigraph/shared.rs and tests.rs; code read only to judge the hydrator change; notes never opened; readings after grading. Product basis: the philosophy and the brief in the product owner's words. Not audited: the engineering side. Missing inputs: none. Value documents changed in range: the brief (preamble; section 2's empty-week clause corrected by Counsel, no record of its own, not relied on; 4a added with its own record, support; two Counsel clarifications in 4a tagged inferred, not relied on); common.md (Counsel line; Standing Approvals entry in effect on its record; nothing relies on it); philosophy and companion unchanged; no pointer line removed or changed.
+  - Goal | brief | cited | section 4; 4a storage work stands | -
+  - DoD 1 | brief | cited | section 4; 4a "What it replaces" untouched | -
+  - DoD 2 | internal mechanics | not audited | the controls are deterministic families, not the paid runs; no spend in range | -
+  - Planner-added: rebuild at open | brief | cited | section 4 | -
+  - Planner-added: failed rebuild keeps marker and original cause (one-cause limit) | brief | inferred | extends philosophy 8.6, section 10; cheap to undo | -
+  - Planner-added: no public call or setting | brief | inferred | extends philosophy section 9 and 8.1; cheap to undo | -
+  - Planner-added: witness changes selection at the base | internal mechanics | not audited | - | -
+  - Scope | brief | cited | section 4; 4a | -
+  - Non-goal: busy-occasion order to the 4a plan | brief | cited | section 4; 4a | -
+  - Non-goal: subject-state read to the 4a plan | brief | inferred | extends 4a; a deferral within the run, cheap to undo | -
+  - Non-goals: healthy selection, public API, stored shape | brief / brief / internal | cited / cited / not audited | section 4; philosophy section 9 | -
+  - Design: rebuild from the graph at open | brief | cited | section 4 | -
+  - Design assumption: mid-session limit | brief | inferred | extends section 4; cheap to undo | -
+  - Design: the hydrator's two exclusions | internal mechanics | not audited | ports are pub(crate); no production caller builds a link ref; the renamed test asserts expansion carries no link | -
+  - Integration | internal mechanics | not audited | merges into the run's own branch | -
+  - Context | brief | cited | the brief's own records | -
+  - Task_1 | brief | cited | section 4; 4a | -
+  - Decision Log 2026-10-15 entries | brief / internal | cited / not audited | section 4; 4a; the waiver line withdrawn by the narrowing entry | -
+  - Decision Log 2026-10-16: runs under the brief; narrowing (busy-occasion cited, subject-state inferred); measurement verdict | brief | cited / inferred | sections 1, 4, 4a; the witness reproducible in range; the re-review's closing was not recorded before the go (a gate-record gap, corrected above) | -
+  - Changes: rebuild at open and cleared marker | brief | cited | section 4; 4a | -
+  - Changes: failed rebuild keeps the marker and cause, one transaction rolled back on failure | brief | inferred | philosophy 8.6, section 10 | -
+  - Changes: healthy store reopens without a graph read; selection unchanged | brief | cited | section 4 | -
+  - Changes: sqlite rebuild (pub(crate)) deletes and rewrites derived index rows | internal mechanics | not audited | derived index recomputed from the graph of record; not a memory operation; not outward-facing | -
+  - Changes: query_objects hydrates links when asked | internal mechanics | not audited | - | -
+  - Changes: README and three design documents state the rebuild and its limits | brief | cited | section 4 | -
+  - Changes: lessons (three entries); run record created; renderer plan superseded; common.md Counsel line and Standing Approvals | internal mechanics / brief | not audited / cited | 4a "the renderer as specified"; section 3 means not departed from; the Standing Approvals entry the owner's own decision on its record | -
+  - Judgement calls and rulings (test expectation; two doc touches; PRs opened; the verdict; the narrowing; the one-cause limit; the waiver correction; go after the re-review; the renderer superseded; the Standing Approvals entry) | internal / brief | not audited / cited / inferred | as above; a PR opened for review is not a merge | -
+  - Decision records whose wording changed after acceptance: none.
+  - Human-only conditions pending: the owner accepts the revised catalog (section 2); the owner accepts the revised roadmap sections (section 3); the owner's blind reading at closeout (4a). None touched by this unit.
+  - Scenarios: (1) a developer opens the revised catalog and finds what is in mind and how it is held, never a rule about what the character must say: prior not yet, now not yet; (2) the owner sits down at v0.2's closeout with blind transcripts and a control arm: prior not yet, now not yet; (3) a direction-level question reaches Counsel as a character-behaviour question: prior not yet, now not yet. Getting closer: no. No scenario moved and the unit by design changes nothing a turn receives; it is authorized ground-clearing under section 4 and 4a's storage work, measured and done, and does not set the run back, but it is no evidence toward the design; the next closer step is the 4a design plan, not more on this line.
+- 2026-10-16: acting on the verdict. No item held; inferred calls journaled (the one-cause limit; no public call; the mid-session limit; the subject-state read's move). The unit closes: status done, the plan moves to completed, the Scenarios line goes to the run record. The verdict's "getting closer: no" is carried to the owner through Counsel with each scenario's state and the audit's reason, as the closeout rules state; no further unit starts on that word.
 
 ## Decision Log (append-only)
 - 2026-10-15 Decision: the decider chose these four residuals for v0.2 (ruling 81) and asked for them to run while Codex capacity is available. One plan with four tasks, not four plans: each task is small, and they share one base and one measurement pattern.
