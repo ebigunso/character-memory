@@ -987,3 +987,20 @@ Prevention:
 
 Evidence:
 - `docs/coding-agent/plans/active/v0-2-residuals-plan.md`, 2026-10-16 revision.
+
+## 2026-10-16 - A plan revision re-reads every research input, and a document revision checks who cites it [tags: orchestration, planning, research]
+
+Symptom:
+- Two plan reviews returned changes for inputs that were already on disk. The residuals plan's revision kept a design for Task_1 that its own root-cause report had measured as ineffective, while the sibling tasks' reports had been folded in. The catalog and roadmap plan sent two parallel tasks to revise a document whose identifiers are cited across the roadmap, decision records and the evaluation repository, and to remove roadmap items an accepted record defers, without checking either.
+
+Root cause:
+- The revision applied review findings without re-reading every research output listed as input, and the catalog plan's research waiver rested on a mapping from the philosophy to the documents, not from the documents to their consumers and records.
+
+Fix applied:
+- Task_1's design now follows its measurements, with a root-cause entry in the Decision Log. The catalog plan rules on identifier stability, the accepted record and the placements before dispatch.
+
+Prevention:
+- Before a plan revision goes to review, every task whose research is cited has a root-cause entry, and its design is checked against the variants the report measured. Before drafting a revision of a referenced design document, grep its identifiers across docs, decisions and the evaluation repository, and grep the decision records for every concept the plan moves or removes.
+
+Evidence:
+- `docs/coding-agent/plans/active/v0-2-residuals-plan.md` and `v0-2-catalog-roadmap-plan.md`, Decision Logs of 2026-10-16.
