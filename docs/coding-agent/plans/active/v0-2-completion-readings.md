@@ -68,4 +68,17 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
   - Findings compared: none found.
   - Correction inside the run: the familiarity items' reason reworded to name 4a and the unit that carries the move.
 
+### v0-2-catalog-roadmap-plan, closeout
+
+- Catalog revision (failures section, G1 to G13, purpose, variants, guarantees throughout, identifiers stable) | covered | brief section 2 and its means.
+- Roadmap and drafts revision (v0.2 closeout and order; v0.3 measure, intent, six DoD items, attribution's core, time in experience; v0.4 reframed, objects leave; v0.5 long horizon, decay and reinforce leave) | covered | brief sections 3 and 5.
+- v0.4 point-in-time recall line (a reading of validity intervals, also a planning question) | extends | brief section 3's v0.4 sentence.
+- C3/C5 acceptance line moved to v0.3 with attribution's core | extends | brief section 3 "Attribution's core, witnessed or told, moves into v0.3".
+- Volatility, review-after and the confidence view leave v0.4 with the machinery | covered | brief section 3 "with confidence and stance"; ADR-D-0018, ADR-D-0030.
+- Proposed ADR-D-0040 (supersedes ADR-D-0005 whole, subtype decision carried forward) | extends | brief section 3 removal statement; the owner accepts the record.
+- Decay wording in ADR-D-0013, ADR-D-0014 reported, not edited; ADR-D-0040 citations conditional, now resolved | covered | brief section 1 governance.
+- Judgement calls (G8 wording; headings; file names kept) | covered | internal mechanics.
+- Orchestrator rulings (identifiers stable; gists; familiarity to the 4a plan; "throughout"; ADR-D-0005 shape) | covered / extends | as the plan-draft reading.
+- Human-only items pending: the owner accepts the catalog; the roadmap sections; the record | needs the owner | brief sections 2 and 3; a reserved act.
+
 ## Findings
