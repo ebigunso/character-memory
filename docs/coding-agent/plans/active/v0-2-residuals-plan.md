@@ -89,8 +89,11 @@
 - Wave 1: [Task_1, Task_2, Task_3]
 - Wave 2: [Task_4]
 
+## Research
+- Research waived: each task's first step finds the root cause and reports it, with the files a fix touches, before any fix is written. The residuals were located by the slices that logged them (rulings 77 and 78; the consolidation slice-end entry). Each task's `owns` is narrowed from its root-cause report before its fix is authorized.
+
 ## Progress Log (append-only)
-- 2026-10-15: plan written; Wave 1 dispatched.
+- 2026-10-15: plan written; Wave 1 dispatched for the root-cause step before the plan review had run (a missed gate). Workers hold after the root cause until the plan review closes and their owns are narrowed.
 
 ## Decision Log (append-only)
 - 2026-10-15 Decision: the decider chose these four residuals for v0.2 (ruling 81) and asked for them to run while Codex capacity is available. One plan with four tasks, not four plans: each task is small, and they share one base and one measurement pattern.
