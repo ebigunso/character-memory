@@ -11,7 +11,7 @@
 ## Definition of Done
 - The catalog carries the brief's section 2 revision in full: the failures section (invented continuity, lost continuity, the mirror, and the month-long measure as a reading), the thirteen situations with their human shape and where the ideal AI character departs, the amended purpose paragraph, and the target variants for a topic, a group, a time of year and the self. The whole catalog is written as guarantees on what is in mind and how it is held, not as rules about what the character says: existing restriction-shaped statements are reworded into that form without changing what their situation tests.
 - Each philosophy statement named in the discussion notes' mapping (the 2026-10-16 "Layer 2 opened" entry of `docs/coding-agent/briefs/active/v0-2-completion-notes.md`) has at least one situation, shown by a mapping table in the task report.
-- The roadmap and the phase drafts carry the brief's section 3 changes and no others at that altitude, as Task_2's acceptance lists them.
+- The roadmap and the phase drafts carry the brief's section 3 changes and no others at that altitude, as Task_2's acceptance lists them. One section 3 change is open against its pass condition and carried to the amendment: familiarity's move to the phase that needs it (v0.2's design text names familiarity, and standing against familiarity is under re-examination).
 - The record that the roadmap's removal of the fact-acceptance machinery departs from (ADR-D-0005's deferral) has a proposed successor for the owner to accept or decline.
 - The owner accepts the revised catalog and the revised roadmap sections (human-only, the brief's pass conditions).
 
@@ -19,6 +19,7 @@
 - The mapping table in Task_1's report: the brief's agent-checkable pass condition needs evidence a reviewer can check line by line; the table is that evidence and is not committed.
 - Catalog identifiers stay stable (Task_1): the roadmap (26 references), the v0.2 draft (31), the v0.3 draft, ADR-D-0027, ADR-D-0033, ADR-D-0034, ADR-I-0035 and the evaluation repository's situated-recall plan cite them; a renumber would break citations this plan may not repair.
 - The roadmap cites new situations by the brief's names (Task_2): the two tasks run in parallel, so Task_2 cannot know Task_1's new identifiers.
+- Near-neighbour situations are cross-referenced (Task_1): no two unconnected entries describe one situation.
 - Task_3, a proposed successor to ADR-D-0005's deferral: the brief removes from the roadmap what an accepted record defers to later stages; an accepted record may not be contradicted silently, and changing one is the owner's act.
 - A worker that finds another accepted record contradicting a brief change stops and reports it (Task_2): for a conflict nobody has seen yet; the known one is Task_3's.
 
@@ -74,8 +75,8 @@
 - acceptance:
   - v0.2: the closeout includes the reading of behaviour with its four binding conditions, its negative probes and its stated limit, and the rule that if any condition cannot be met the reading is not run and v0.2 closes on the retrieval tier with that limitation written in; the order is renderer and example loop, then the reading, then the evals re-baseline and the paid runs; a pointer naming another phase follows a move this task makes; the v0.2 design text is otherwise untouched.
   - v0.3: its measure (the two-characters reading against the same model with the whole transcript in context), reflection's intent in the owner's terms, the six added definition-of-done items, attribution's core (witnessed or told) moved in, and time counted in experience written as a decision for v0.3's planning: in v0.3 if cheap over the trace store, otherwise the first named item of v0.4.
-  - v0.4: what the character holds about the world over time (validity intervals, aliases and roles over time, who else knows, source reliability as the character's own belief about a source); attribution's core leaves it; the fact-acceptance machinery leaves the roadmap, citing Task_3's proposed record.
-  - v0.5: the long horizon proper (a decade of gists, recognition of a returning stranger, query-time associative activation, durable units on measured demand); decay and reinforce leave its draft; gist consolidation sits in one phase, by the ruling in the Decision Log.
+  - v0.4: what the character holds about the world over time (validity intervals, aliases and roles over time, who else knows, source reliability as the character's own belief about a source); attribution's core leaves it; the first-class fact-acceptance objects (ADR-D-0005's `Assertion`, `Claim`, `EvidenceLink`, `BeliefAssessment`, `SourceAssessment`) leave the roadmap, while ADR-D-0035's assertions stay; the roadmap cites ADR-D-0040 as proposed, and the citation is removed at integration if Task_3 proposes no record.
+  - v0.5: the long horizon proper (a decade of gists, recognition of a returning stranger, query-time associative activation, durable units on measured demand); decay and reinforce leave its draft; the long-horizon consolidation of periphery into gist sits in v0.5 alone, and v0.3's episode and day gists stay, by the ruling in the Decision Log.
   - No other change at that altitude; new situations are cited by the brief's names; another accepted record found contradicting a change is reported, not edited.
 - validation:
   - kind: review
@@ -93,10 +94,10 @@
 
 ### Task_3: The deferral of the fact-acceptance objects is put to the owner as a record
 - type: docs
-- owns: one new file under docs/decisions/design/ (the next free ADR-D number)
+- owns: docs/decisions/design/ADR-D-0040-*.md (one new file; ADR-D-0040 is the next free number on every branch)
 - depends_on: []
 - acceptance:
-  - Propose an ADR if the admission test passes (`durable-docs-authoring/references/adr.md`): the brief's removal of the fact-acceptance machinery from the roadmap, as the outcome of ADR-D-0005's revisit, with status proposed.
+  - Propose an ADR if the admission test passes (`durable-docs-authoring/references/adr.md`): the brief's removal of the first-class fact-acceptance objects from the roadmap, as the outcome of ADR-D-0005's revisit, with status proposed; ADR-D-0035's assertions (commitments carried by ordinary beliefs) stay.
   - ADR-D-0005 and every other accepted record stay unedited; the report names each accepted record whose text the proposal would affect (ADR-D-0016 and ADR-D-0035 checked).
 - validation:
   - kind: review
@@ -121,9 +122,10 @@
 - 2026-10-16 Decision: the plan review of b3d03f6b (CHANGES REQUESTED) applied, with these rulings.
   - ADR-D-0005: the roadmap carries the owner's ratified removal, and Task_3 proposes the record that makes it the outcome of ADR-D-0005's revisit, for the owner to accept. Holding the v0.4 portion instead was rejected: the brief states the removal outright, and the record is the owner's act either way.
   - Familiarity's placement waits for the amendment: v0.2's design text names it, and standing against familiarity is under re-examination (the brief's section 4).
-  - Gist consolidation: "move down to the phases that need them" is read as the later phase where its use arises. The decade of gists sits in v0.5; v0.3 keeps only what its reflection's compression keeps (peak and ending, cause and central people), as a definition-of-done item, not as a consolidation feature. Cheap to undo; logged for the closeout audit.
+  - Gist consolidation: "move down to the phases that need them" is read as the later phase where its use arises. v0.3's episode and day gists stay, since its reflection is built on them and ADR-D-0027 and ADR-D-0033 rest on them; what sits in v0.5 alone is the long-horizon consolidation of periphery into gist, the decade of gists; the peak-and-end item is added to v0.3's compression, not substituted for it. Cheap to undo; logged for the closeout audit.
   - Time counted in experience is written into the roadmap as a decision for v0.3's planning, which judges "cheap" from a cost reading over the trace store; this plan does not judge it.
   - A pointer in v0.2's text naming another phase (for example attribution fields "(v0.4)") follows the move, and is not design text.
   - Catalog identifiers are stable; new situations take new identifiers and are cited in the roadmap by the brief's names; near-neighbours are cross-referenced.
   - "Written throughout" is read as the whole catalog, so existing restriction-shaped statements are reworded; "nothing beyond section 2" is dropped.
   - The order is renderer and example loop, the reading, then the re-baseline and the paid runs (sections 3 and 5).
+- 2026-10-16 Decision: the re-review of b5207af4 (CHANGES REQUESTED, one major) applied: the gist ruling keeps v0.3's episode and day gists; ADR-D-0040 is fixed as Task_3's number and Task_2's citation is conditional; familiarity's move is recorded as open against the section 3 pass condition; the cross-referencing requirement is listed; ADR-D-0035's assertions are kept apart from the first-class objects that leave.
