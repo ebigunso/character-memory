@@ -84,4 +84,11 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
 - Task_7 | covered | section 3; 4a "What it replaces".
 - Decision Log entries | covered | as above; the carve-out entry records the question sent and the part held.
 
+- Verdict comparison for the situated recall plan revision (2026-10-16, at 6e6eea8c), as returned:
+  - Reading compared: Goal unread as an item; DoD 1 to 10 agree (DoD 3: needs the owner against ask-now); Planner-added 1, 3, 4, 6, 7, 8, 10, 11, 12 agree; 2 diverges (covered on gives 3; auditor inferred, the cursor does not resume a matter- or topic-anchored gathering); 5 diverges (covered on the constraint and the Decision Log's answer; ask-now, outward-facing with no standing approval, the log not support, not counted against the Plan Gate); 9 agrees with the direction mark; Non-goals agree; Compatibility agrees; A1, A2, A3 agree; Task_1, 2, 3, 5, 6, 7 agree; Task_4 diverges (covered; ask-now on the live null spend); Decision Log 1 agrees; 2 diverges (covered on the in-session answer; ask-now); 3 diverges on the shipped-threshold ruling only; 4 agrees; 5 agrees.
+  - Findings compared: none found under Findings; departures on item lines: DoD 4's omitted disposition agrees (nothing to hand over in v0.2); Planner-added 2's continuation gap for matter and topic anchors bears on the design and not recorded, graded inferred.
+  - Correction inside the run: the continuation gap recorded as a finding below and escalated; the live-null item is read as needing the owner's authorization held by the Orchestrator, which it has.
+
 ## Findings
+
+- 2026-10-16, situated recall plan: the walk's cursor, used as a cut situation's continuation, has no key for a situation anchored on an unsettled matter or a topic, so for those anchors "offers to continue" reaches nothing. Reading: bears on the design (the character experiences an empty offer). Escalated to Counsel as a value question on 2026-10-16; the continuation for matter- and topic-anchored situations is held until the owner answers.

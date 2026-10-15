@@ -64,7 +64,8 @@
 - After this plan: the evaluation repository's re-baseline at the final tip, then the closeout reading (brief section 3), then the paid runs (section 5).
 
 ## Open Questions (max 3)
-- None. The live-embedder null distribution was authorized by the owner in this session on 2026-10-16: "You can do the embedding call." (Decision Log).
+- With the owner, through Counsel (2026-10-16): does a turn's recall itself tell the character a thing is verifiably absent, or only "nothing found" with the certainty coming from a separate exhaustive check? (Counsel: the snapshot part is below the owner's level; the brief's clause now reads "as of the moment it looked, which it says".)
+- With the owner, through Counsel (2026-10-16): when a situation about an unsettled matter or a topic is cut, must the character be able to reach the rest of that matter or topic itself, or is it enough that the turn says it was cut and the rest is reachable by person, place or thread? Held: the continuation for matter- and topic-anchored situations.
 
 ## Assumptions
 - A1: Oxigraph 0.5.7 exposes no read snapshot across queries. Task_3 probes it and reports what the engine gives, as input to the verified-absence unit.
@@ -274,6 +275,30 @@ Task_2 and Task_4 both touch `src/usecases/retrieve.rs`; the file is split by fu
   - Human-only conditions pending: the owner's blind reading at closeout (4a); the owner accepts the revised roadmap sections (section 3); the owner accepts the revised catalog (section 2). No proxy settles one.
   - Scenarios: none
 - 2026-10-16: acting on the verdict. Planner-added 6 and Decision Log 2 are met by the owner's answer recorded in the Decision Log ("You can do the embedding call.", 2026-10-16, in this session). Planner-added 12 is the Orchestrator's own line and is dropped (Non-goals). DoD 3, Planner-added 5, A1, Task_3's verify_absence and Decision Log 3's ruling are one question for the owner, sent to Counsel (below); verified absence is carved out of this plan as its own unit on the answer, and the plan is audited again as a revision.
+
+- 2026-10-16: plan-draft value audit dispatched at `6e6eea8c`, text verbatim: "You are the value auditor. Read references/value-audit-mandate.md of the orchestration-harness skill and follow it exactly. Position: plan draft. Plan: docs/coding-agent/plans/active/v0-2-situated-recall-plan.md. Governing brief: docs/coding-agent/briefs/active/v0-2-completion-brief.md. Changes since: none."
+- 2026-10-16: verdict as returned (comparison lines in the readings file). Position: plan draft. Documents read: the plan, the brief, the philosophy, its companion, common.md (pointer lines and Standing Approvals); readings after grading only; notes never opened. Product basis: philosophy. Not audited: the engineering side. Missing inputs: none. Value documents changed in range: none.
+  - DoD 1, 2, 4 to 10 | brief | cited | 4a gives 1 to 5, means, told constraint, measurement constraint, records paragraph; section 3 and 4; philosophy 8.1, 8.5, 9; DoD 4's omitted disposition noted as v0.3's, reported unknown | -
+  - DoD 3 (two states in the turn; verified absence held) | brief | ask-now | 4a gives 5 against the bounded-recall constraint; 4a pass condition names three states | the plan delivers two of three with the third pending the owner's answer. Value question as sent to Counsel (in the turn or on a separate check; a named snapshot) | direction
+  - Planner-added 1, 3, 4, 7, 8 | brief | cited | 4a gives 1, 2, 3; the constraint; standing and replaced lists | -
+  - Planner-added 2 (cut = count plus the walk's cursor for the anchor) | brief | inferred | extends 4a gives 3; a situation anchored on a matter or a topic has no walk key that resumes its gathering, so for those anchors the continuation does not reach what the bound dropped; cheap to undo | -
+  - Planner-added 5 (live-embedder null shipped) | brief | ask-now | 4a resemblance constraint covers the intent | outward-facing with no standing approval; the plan's quoted authorization is the Orchestrator's writing, not support; the only reason, so it does not count against the Plan Gate; the call waits on the authorization the Orchestrator holds from the owner. Value question: may the run spend once on live embedding calls before the reading | -
+  - Planner-added 6, 10, 11, 12 | internal mechanics | not audited | - | -
+  - Planner-added 9 (order-rule experiment) | brief | inferred | extends 4a gives 1 and 2; philosophy 8.1; cheap to undo | direction
+  - Non-goals | brief / internal | cited (verified absence ask-now as DoD 3; harness placement not audited) | 4a means, gives 2, told constraint, provisional under gives 3; sections 2 to 5; measurement constraint; the records paragraph closes the list, so leaving D-0013, D-0014, I-0017 is no departure | -
+  - Compatibility stance: break | brief | cited | 4a "What it replaces" | -
+  - A1, A2 | internal mechanics | not audited | - | A1 informs the held question
+  - A3 | brief | cited | 4a measurement constraint | -
+  - Task_1, 2, 3, 5, 6, 7 | brief | cited | 4a records paragraph, gives 1 to 5, structural-access constraint, section 3 and 4, philosophy 8.1, 8.4, 8.5, 9 | -
+  - Task_4 | brief | ask-now | 4a gives 1 to 5, the resemblance constraint, the provisional coverage policy (provisional) | carries Planner-added 5's spend only, not counted against the Plan Gate; the order rule as Planner-added 9 | direction
+  - Decision Log 1 | brief | cited | 4a gives 2, provisional under gives 1, the share seed means, records paragraph | -
+  - Decision Log 2 | brief | ask-now | as Planner-added 5 | -
+  - Decision Log 3 | brief / internal | ask-now (the shipped-threshold ruling only, as Planner-added 5); the rest cited or not audited | -
+  - Decision Log 4 | internal | not audited | - | the decay minor withdrawn by Decision Log 5
+  - Decision Log 5 (carve-out, question to Counsel) | brief | ask-now | 4a gives 5 and the bounded-recall constraint | the question is open; the Open Questions section read "None" while it was outstanding | direction
+  - Human-only conditions pending: the owner's blind reading at closeout (4a); the owner accepts the revised roadmap sections (section 3). Record acceptances are reserved acts through Task_1.
+  - Scenarios: none
+- 2026-10-16: acting on the verdict. The plan waits for the owner's answer on verified absence (Counsel: part 1 with the owner; part 2 below the owner's level, the brief's clause reworded "as of the moment it looked, which it says", committed at 93929a11). The audit's "Findings compared" named a departure as bearing on the design and not recorded: the continuation reaches nothing for a matter- or topic-anchored situation; recorded in the readings file, escalated to Counsel as a value question, and the continuation for those anchors held. Open Questions now name both. Inferred calls journaled: the continuation as the walk's cursor (with its gap); the order-rule experiment (direction). The plan is authorized only when an audit on the owner's answers holds nothing.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 - 2026-10-16 Decision: the plan is one plan with seven tasks, contract before gathering, the walk beside the gathering, the memo and docs after.
