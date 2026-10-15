@@ -6,14 +6,13 @@
 - work_type: code
 
 ## Goal
-- Close four residuals that the v0.2 slices logged and did not fix, chosen by the decider on 2026-10-15 (ruling 81): a character with a long history of beliefs about one person recalls them as fast as it recalls its promises; a character whose recall statistics once failed recovers without an operator; a second person present during an activity brings their own state as the first does; and what a busy occasion brings does not depend on how its identifiers happen to sort.
+- Close three residuals that the v0.2 slices logged and did not fix, chosen by the decider on 2026-10-15 (ruling 81; a fourth, the second person under activity pressure, was dropped on its root cause): a character with a long history of beliefs about one person recalls them as fast as it recalls its promises; a character whose recall statistics once failed recovers without an operator; and what a busy occasion brings does not depend on how its identifiers happen to sort.
 
 ## Definition of Done
 - The subject-state read selects exactly what it selects at the base, and at 2,000 beliefs about one person it takes no longer than the same order of time as the trigger and due reads at that size (about 0.15 s on this machine, against about 9 s at the base). The bound is ruling 67's.
 - A recall-statistics store marked unhealthy becomes healthy again without operator action and without a new public call: the next time the store is opened, its statistics are rebuilt from the graph store and the marker clears. A rebuild that fails leaves the marker in place with its cause. What retrieval selects with healthy statistics is unchanged.
-- With an activity and two people present, each person brings their own state memories by the same rule; the second person's count no longer drops from two to one at any activity floor, and nothing the first person or the activity brought is lost to make the room unless the floors say so.
-- Busy-occasion selection gives the same result in both identifier orders.
-- Every task is measured as its validation states, with before and after numbers, a paragraph on what they mean for the character and a verdict in this plan's Decision Log. The plan is not complete until they exist.
+- Busy-occasion selection keeps the current, salient, then newest observations of an occasion, and gives the same result in both identifier orders.
+- Measurement, per the checkpoint rule: Task_1 carries its timing witness at scale (ruling 67's check) and Task_2 its red/green recovery witness; one slice-end run at the final tip covers Task_4's family and the controls. Before and after numbers, a paragraph on what they mean for the character and a verdict go in this plan's Decision Log. The plan is not complete until they exist.
 
 ## Scope / Non-goals
 - Scope: the four fixes, their tests and witnesses, their measurements, and this plan.
@@ -21,14 +20,13 @@
 
 ## Design
 - Each task first finds the root cause and states it in its report. If the fix needs a contract change, a new public surface, a stored-shape change or a ruling that is not in this plan, the worker stops and reports instead of working around it (workaround tripwire).
-- Task_1 (subject-state read): the selector is `select_state` in `src/adapters/oxigraph/sparql_selectors.rs`. The trigger and due selectors beside it read the same scale in about 0.15 s, so the expected shape is the same bounded selection pushed into the query; the result must be identical.
-- Task_2 (statistics recovery): the statistics are derived from the graph, so they can be recomputed from it. The chosen recovery is a rebuild at open when the stored marker is unhealthy, in the composition path that already chooses the in-memory unhealthy fallback (`src/composition.rs` near 309). No new public call, because no application can know when to call it and a character should not need an operator to recover.
-- Task_3 (second person under activity pressure): the consolidation's principle 4 rounds among the scopes of one kind. The worker finds why the second person's state room shrinks when an activity is present (a shared budget, a round that counts the activity, or an order effect) and fixes the rule, not the count.
-- Task_4 (busy-occasion order): which observations of one occasion survive the fanout bound is decided by the link identifier order today (`select_links_touching` sorts refs by id, and `apply_fanout_limits_by_pair` keeps the first 16). The chosen key orders an occasion's eligible observation neighbours before the bound: salient first, then newest by memory time (the observation's own time, else its occasion's scene time, as `ParticipantOccasion::memory_time` defines), then identifier as the last resort. It is ruling 70's order for what is held about a present person, applied to what was observed at an occasion, so a character recalls the striking details of a busy occasion and, among equals, the latest. The same key orders both the pre-hydration path and the materialized plan. The salience comes from a compact projection beside the existing occasion metadata read, never from hydrating every candidate (ruling 67). Rejected: a general key for every relation (changes recall far beyond this route); sorting after hydration or at the pack (the discarded observations were never read); raising the bound (moves the cliff); time before salience (minutes within one occasion say less than salience about what a person keeps).
+- Task_1 (subject-state read): all four state reads go through `select_state` (`src/adapters/oxigraph/sparql_selectors.rs:433`), which reads only rank columns and applies the bound in Rust (575-602); ruling 67 rejected pushing the bound into the query (about 220 times slower). What differs is the scope: subject state injects a VALUES list of every member with a FILTER EXISTS per row (294-307), while trigger and due use a graph pattern the engine joins (344-399). The fix makes the subject scope a joinable pattern, or resolves membership in Rust; the bound stays in Rust. The result, including the filtered and trace list the selector returns, must be identical.
+- Task_2 (statistics recovery): the statistics are derived from the graph, so they can be recomputed from it. The chosen recovery is a rebuild at open when the stored marker is unhealthy, in the composition path that already chooses the in-memory unhealthy fallback (`src/composition.rs` near 309). No new public call, because no application can know when to call it and a character should not need an operator to recover. Known limit: a long-running process whose store fails mid-session stays conservative until it next opens the store. Retrying after the next successful projection was deferred: it adds a rebuild on a hot write path for a failure not seen outside tests; the slice-end verdict judges whether that holds.
+- Task_4 (busy-occasion order): which observations of one occasion survive the fanout bound is decided by the link identifier order today (`select_links_touching` sorts refs by id, and `apply_fanout_limits_by_pair` keeps the first 16). The chosen key orders an occasion's eligible observation neighbours before the bound: current first under the lifecycle policy (a suppressed or superseded observation takes no seat), then salient, then newest by memory time (the observation's own time, else its occasion's scene time, as `ParticipantOccasion::memory_time` defines), then identifier as the last resort. It is ruling 70's order (salient current first, then newest, then id) for what is held about a present person, applied to what was observed at an occasion, and ruling 65's rule of ordering before a bound the way the section will judge (observations of one occasion tie on graph and cue score), so a character recalls the striking details of a busy occasion and, among equals, the latest. The same key orders both the pre-hydration path and the materialized plan. The order comes from reusing `select_state`'s salience order scoped to the occasion's observations, which already puts current first and falls back from the observation's time to its occasion's scene time, as `order_current_subject_links` (674) does for subject state; never from hydrating every candidate (ruling 67). Because that reuses Task_1's selector, Task_4 follows Task_1. Rejected: a general key for every relation (changes recall far beyond this route); sorting after hydration or at the pack (the discarded observations were never read); raising the bound (moves the cliff); time before salience (minutes within one occasion say less than salience about what a person keeps).
 
 ## Integration
 - Base: the renderer plan tip `ac41e5c0`, which carries the whole library stack through the prospective slice. The renderer's tasks touch no retrieval code, so the two lines run in parallel and are joined by plain merges before the closeout re-baseline.
-- Tasks 3 and 4 both touch selection in graph expansion, so they run in sequence with one worker. Tasks 1 and 2 touch other files and run in parallel.
+- Tasks 1 and 2 run in parallel; Task_4 follows Task_1 because it reuses the state selector Task_1 changes.
 - After this plan, the evals Task_6 re-baseline runs once on the finished library.
 
 ## Tasks
@@ -39,55 +37,43 @@
 - depends_on: []
 - acceptance:
   - The root cause, stated with the query before and after.
-  - At the base and the tip, the same store gives the same selected beliefs, in the same order, in both identifier orders.
+  - At the base and the tip, the same store gives the same selected beliefs, in the same order, and the same filtered and trace list, in both identifier orders.
   - A timing witness outside the permanent suite at 2,000 beliefs about one person, before and after, interleaved, three warm samples each.
   - Existing tests pass unchanged.
 - validation:
   - kind: command; owner: worker; "cargo fmt --check; cargo clippy --all-targets -- -D warnings; cargo test; the equality and timing witnesses"
-  - kind: review; owner: reviewer; "Tier D: the result is identical, the bound is in the query, the witness is not in the suite"
-  - kind: command; owner: orchestrator; "Measurement: the timing witness before and after (instrument), plus the evals familiar-person and state families at the tip with native results identical to the base (control). Falsified if any selected belief differs or the after time at 2,000 beliefs is above 1 s."
+  - kind: review; owner: reviewer; "Tier D: the result is identical, the bound stays in Rust, checked at scale against the base form; the witness is not in the suite"
+  - kind: command; owner: orchestrator; "Measurement: the timing witness before and after at 2,000 beliefs (instrument); the familiar-person and state families are controls in the slice-end run. Falsified if any selected belief differs or the after time at 2,000 beliefs is above 1 s."
 
 ### Task_2: A character whose recall statistics failed recovers on its own
 - type: impl
 - owns: src/composition.rs, src/adapters/stats/sqlite.rs, src/adapters/oxigraph/shared.rs (the two MemoryLink exclusions in the object hydrator only), src/adapters/oxigraph/tests.rs, and their tests
 - depends_on: []
 - acceptance:
-  - A store marked unhealthy and reopened is healthy, with statistics equal to those a fresh build from the same graph gives.
+  - A witness store where the unhealthy state changes what retrieval selects at the base (so before differs from healthy), marked unhealthy and reopened, is healthy with statistics equal to a fresh build from the same graph, and selects what a never-failed store selects.
   - A rebuild that fails leaves the marker and its cause, and retrieval behaves as it does with an unhealthy marker today.
   - No new public call or setting.
 - validation:
   - kind: command; owner: worker; "cargo fmt --check; cargo clippy --all-targets -- -D warnings; cargo test"
   - kind: review; owner: reviewer; "Tier D: no new public surface, the rebuild is from the graph, a failed rebuild keeps the marker, healthy behavior unchanged"
-  - kind: command; owner: orchestrator; "Measurement: an integration witness that marks a store unhealthy, reopens it and retrieves, before (selectivity stays degraded) and after (selectivity equals a healthy store's) as the instrument; the evals scene and keyless families with native results identical to the base as the control. Falsified if the reopened store's selected memories differ from a never-failed store's."
-
-### Task_3: A second person present during an activity brings their own state
-- type: impl
-- owns: the graph expansion and selection files the cause lies in (report them); their tests
-- depends_on: []
-- acceptance:
-  - The root cause and the rule changed.
-  - With an activity and two people present, each brings two state memories at every activity floor in the evals activity-pressure story.
-  - Existing tests pass, or each changed expectation is listed as an intended change with its reason.
-- validation:
-  - kind: command; owner: worker; "cargo fmt --check; cargo clippy --all-targets -- -D warnings; cargo test"
-  - kind: review; owner: reviewer; "Tier D and Tier A: the rule, not the count, is fixed; principle 4 holds"
-  - kind: command; owner: orchestrator; "Measurement: the evals activity-pressure family before and after, both id orders, twice. Falsified if the second person still brings fewer state memories than the first under the same floors, or the topic's on-topic count falls below the base at any floor."
+  - kind: command; owner: orchestrator; "Measurement: the red/green witness above is the instrument (at the base the reopened store selects differently from a healthy one; at the tip identically); the scene and keyless families are controls in the slice-end run. Falsified if the reopened store selects differently from a never-failed store."
 
 ### Task_4: What a busy occasion brings does not depend on identifier order
 - type: impl
 - owns: src/policy/graph_expansion.rs (incident-neighbour ordering before the fanout limits, both paths); src/adapters/oxigraph/shared.rs (the occasion metadata handed to that ordering; not Task_2's hydrator lines); src/adapters/oxigraph/sparql_selectors.rs (the compact salience projection only; not Task_1's subject-state selector); their tests
-- depends_on: []
+- depends_on: [Task_1]
 - acceptance:
   - The family that showed the dependence (the companion's busy-occasion residual, `calibrate_cue_floors --residuals-only`) selects the same observations in both identifier orders, and with equal salience they are the 16 newest.
-  - A test at the policy or adapter boundary shows the selected observation times in both identifier orders with the caps unchanged.
+  - A test at the policy or adapter boundary shows the selected observation times in both identifier orders with the caps unchanged, plus a salient older observation that survives over newer equals and a suppressed one that takes no seat.
 - validation:
   - kind: command; owner: worker; "cargo fmt --check; cargo clippy --all-targets -- -D warnings; cargo test"
   - kind: review; owner: reviewer; "Tier D: the tie key carries meaning and identifier order is the last resort"
-  - kind: command; owner: orchestrator; "Measurement: the family that showed the dependence, both id orders, twice, before and after. Falsified if the two orders still differ."
+  - kind: command; owner: orchestrator; "Slice-end measurement at the final tip, run by evals-worker: the busy-occasion residual family before and after, both id orders, twice; controls: the other three residual families and the scene and familiar-person families match the base, or each difference is listed as intended (this order also decides admission under the node cap). Falsified if the two orders still differ, or if at equal salience the kept set is not the 16 newest."
 
 ## Task Waves
-- Wave 1: [Task_1, Task_2, Task_3]
+- Wave 1: [Task_1, Task_2]
 - Wave 2: [Task_4]
+- Task_3 dropped.
 
 ## Research
 - Research waived: each task's first step finds the root cause and reports it, with the files a fix touches, before any fix is written. The residuals were located by the slices that logged them (rulings 77 and 78; the consolidation slice-end entry). Each task's `owns` is narrowed from its root-cause report before its fix is authorized.
@@ -107,5 +93,8 @@
 - 2026-10-15 Decision: Task_4's root cause and key, as the Design states. Captures at 31dc6923 ran twice, byte-identical: the reminder keeps 16 of 25 observations of the busy occasion, and in both identifier orders the kept set is exactly the 16 lowest identifiers, so the original order loses the newest detail and keeps the five oldest. Tasks 1, 2 and 4 touch different functions of `sparql_selectors.rs` and `shared.rs`; their branches are joined by plain merges.
 - 2026-10-15 Decision (proposed to the decider): drop Task_3.
   - Root cause: Participant and Activity scopes are already ordered apart (`src/usecases/retrieve/state.rs`), and principle 4's round is correct. In the activity-pressure story the 12-seat derived section holds 4 activity and 5 topic beliefs (5 and 4 at floor 2), which leaves 3 seats for the people present; a round over 3 seats gives the first person 2 and the second 1. Without the activity, 4 seats give 2 each.
+  - Current numbers (Task_4's capture at 31dc6923, measurements 4 and 5, both identifier orders): 2 and 2 without the activity; with it, 2 and 1 at floors 0, 1 and 2, with 5, 5 and 4 on-topic and 4, 4 and 5 activity-thread beliefs, matching the older reading at fa90d57.
   - Reading: what fills the seats is the section budget, and scene order breaks the odd seat. Two each would need a thirteenth seat or would evict an activity or topic belief that outranks the participant beliefs. Neither is a fix of a defect. The residual is withdrawn, and the consolidation's note is corrected by this entry.
-  - User approval: pending; the decider chose this residual.
+  - User approval: the decider, 2026-10-15, in this session: "Drop it" (answering whether to drop residual 3). Task_3 is dropped; Wave 1 is [Task_1, Task_2, Task_4].
+- 2026-10-15 Decision: the plan review (Tier D and Tier A) returned changes, applied: Task_1's design keeps the bound in Rust and fixes the scope (the earlier text pointed at the shape ruling 67 rejected); Task_4's key puts current first and reuses `select_state`'s order, so Task_4 follows Task_1, and its measurement tests the newest-16 rule with a control set; Task_2's witness must change selection at the base, and its mid-session limit is recorded; measurement follows the checkpoint rule; Task_3 is removed. Lesson candidate: when a Design says to do it like a sibling, quote the sibling's code location and check it against the rulings it touches.
+  - Next: a re-review of this revision, then the plan-draft value audit against the product philosophy, then go for Wave 1.
