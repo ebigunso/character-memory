@@ -164,6 +164,49 @@
 
 - 2026-10-16: Task_3 ADR-D-0040 revised (64eb0c3a, consulted entry b71ed5c2; Tier A re-review APPROVED), merged here at 6c8479f6. Wave 1 complete; all Reviewer items pass. Pending: the three human-only items (the owner accepts the catalog; the roadmap sections; the proposed record), carried through Counsel. Closeout audit next.
 
+- 2026-10-16: closeout value audit dispatched at `473bfce7`, text verbatim (paths made repository-relative for the committed record): "You are the value auditor. Read references/value-audit-mandate.md of the orchestration-harness skill and follow it exactly. Position: closeout. Plan: docs/coding-agent/plans/active/v0-2-catalog-roadmap-plan.md. Governing brief: docs/coding-agent/briefs/active/v0-2-completion-brief.md. Changes since: 785391cf."
+- 2026-10-16: verdict as returned (comparison lines in the readings file). Position: closeout. Documents read: the plan; the brief (HEAD and its diff over the range); the philosophy by the pointer line; its companion; common.md (Standing Approvals: one entry, the owner's acceptance committed); the artifact over 785391cf..HEAD with the exclude pathspecs (catalog, roadmap, four drafts, ADR-D-0040, run record, common.md, lessons, skill-candidates, the renderer and residuals plans); ADR-D-0005 read to understand; notes never opened; readings after grading. Product basis: philosophy and the brief in the owner's words. Not audited: the engineering side. Missing inputs: none. Value documents changed in range: the brief: (a) 4a added at a9e0daac with its own ratification record, support; (b) at 93929a11 the verified-absence sentence gained "as of the moment it looked, which it says", tagged inferred and clarified by Counsel, no ratification record of its own, no support; no item of this unit depends on it. Pointer lines unchanged; the Counsel line at common.md:14 is not a pointer line.
+  - Catalog failures section | brief | cited | s2; philosophy 12 | -
+  - Catalog G1 to G7, G9, G11 to G13 | brief | cited | s2 item by item; philosophy 7.3 to 7.6, 8.2 | -
+  - Catalog G8 wording (reflection's tendencies for "testable from v0.3") | brief | inferred | extends s2 and the catalog's rule against phase mapping; cheap to undo | -
+  - Catalog G10's first departure ("empty only for a person") | brief | ask-now | s2 reads "empty only for the AI ..."; the brief's own reason clause, its absence clause and philosophy 8.3 say the opposite; the catalog chose the second reading; the note to Counsel is an account, not an answer. Value question: when a week passes with no visitors and the character reflects during it, is that week lived time for the character, moving its old feelings back as a full week would, or is it empty for the character as it would be for a person? | -
+  - Catalog purpose paragraph | brief | cited | s2; philosophy 2.4 | -
+  - Catalog purpose's nine departures where 2.4 lists five | brief | inferred | extends philosophy 2.4 and 7.4, s2's declared departure and "it also knows the exact date"; cheap to undo | direction
+  - Catalog target variants | brief | cited | s2; philosophy 8.1 | -
+  - Catalog rewordings as guarantees | brief | cited | s2 means built as written; philosophy 8.5, 8.1 | -
+  - Catalog identifiers stable, cross-references | brief | inferred | extends s2; cheap to undo | -
+  - Roadmap and v0.2 draft Closeout section | brief | cited | s3 first bullet verbatim; s7 | -
+  - The order | brief | cited | s3 means built as written; s5 | -
+  - Attribution pointers follow the move | brief | cited | s3 | -
+  - v0.3 reflection's intent and the measure | brief | cited | s3 | -
+  - v0.3 six gains | brief | cited | s3; philosophy 7.3, 7.5, 8.2 | -
+  - v0.3 attribution's core and the C3/C5 line | brief | inferred | extends s3; cheap to undo | -
+  - v0.3 the flinch before the reason | brief | cited | s2; philosophy 7.4 | -
+  - Time in experience as a v0.3 planning decision | brief | cited | s3; 4a | -
+  - Gist ruling | brief | inferred | extends s3 with the v0.3 gain; cheap to undo | -
+  - v0.4 reframed | brief | cited | s3; philosophy 8.2 | -
+  - v0.4 objects leave; ADR-D-0035's assertions stay | brief | cited | s3 | -
+  - v0.4 volatility, review-after and the confidence view leave | brief | inferred | extends s3's correction statement and philosophy 8.3; cheap to undo | -
+  - v0.4 point-in-time recall line | brief | inferred | extends s3 and philosophy 8.3; cheap to undo | -
+  - v0.4 conditional ADR-D-0040 citation, resolved | brief | inferred | extends s3 and 4a line 55's pattern; cheap to undo | -
+  - v0.4 file name kept; planning questions | internal mechanics | not audited | - | -
+  - v0.5 long horizon; decay and reinforce leave | brief | cited | s3; philosophy 8.5, 8.3 | -
+  - Roadmap API illustration and line 1763 | brief | cited | s3 | -
+  - Familiarity's move left to the 4a plan | brief | inferred | extends s3 with 4a gives 4 and line 63; the s3 pass condition openly unmet for this part; cheap to undo | -
+  - ADR-D-0040 proposed | brief | cited | s3; philosophy 8.2; 4a line 55's form; the owner's acceptance pending | -
+  - Ruling: full supersession of ADR-D-0005 with the subtype decision carried | brief | inferred | extends s3; cheap to undo | -
+  - Ruling: the removal carried now, the record proposed | brief | cited | s3 | -
+  - Rulings: identifiers; names; cross-references; "throughout"; pointers; order | brief | as graded above | -
+  - Handoff of D-0013, D-0014, I-0017 wording | brief | cited | s1; no accepted record edited | -
+  - Notes for Counsel (nine departures; the G10 clause) | brief | cited | s1; accounts, not answers | direction
+  - common.md Counsel line and Standing Approvals entry | brief | cited | s1; the owner's acceptance committed | -
+  - Spelling, G8's coverage clause, consulted name | internal mechanics | not audited | - | -
+  - In range, not items of this unit: lessons, skill-candidates, the renderer plan's log, the residuals plan, the run record, the readings | - | not audited | - | -
+  - Decision records whose wording changed after acceptance: none.
+  - Human-only conditions pending: the owner accepts the revised catalog (s2); the owner accepts the revised roadmap sections (s3); the owner's blind reading at closeout (4a, not this unit's). Reserved act pending: the owner accepts or declines ADR-D-0040.
+  - Scenarios: (1) a developer opens the revised catalog and finds, for the three failures and the thirteen situations, what is in mind and how it is held, and never a rule about what the character must say: demonstrated; observe by opening docs/design/continuity_situation_catalog.md at "Failures that outweigh success" and section G. (2) the owner's blind reading with a control arm: not yet. (3) a direction-level question reaches Counsel as a character-behaviour question instead of being decided and logged: not yet. Getting closer: yes; one scenario moved from not yet to demonstrated on the evidence in the range.
+- 2026-10-16: acting on the verdict. G10's departure is one value question, sent to Counsel for the owner; the G10 departure text is the part held (the catalog stays as written until the answer, then follows it). Inferred calls journaled: G8's wording; the nine departures (direction); identifiers and cross-references; the C3/C5 line; the gist ruling; volatility and the confidence view leaving; point-in-time recall; the conditional citation; familiarity's sequencing; the full supersession. The unit closes when an audit after the answer holds nothing and the owner's acceptances arrive.
+
 ## Decision Log (append-only)
 - 2026-10-16 Decision: the plan review of b3d03f6b (CHANGES REQUESTED) applied, with these rulings.
   - ADR-D-0005: the roadmap carries the owner's ratified removal, and Task_3 proposes the record that makes it the outcome of ADR-D-0005's revisit, for the owner to accept. Holding the v0.4 portion instead was rejected: the brief states the removal outright, and the record is the owner's act either way.
