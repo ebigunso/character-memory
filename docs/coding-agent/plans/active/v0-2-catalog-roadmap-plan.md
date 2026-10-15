@@ -6,12 +6,12 @@
 - work_type: docs
 
 ## Goal
-- Carry out sections 2 and 3 of the v0.2 completion brief: the continuity situation catalog becomes the standard the ratified product philosophy is judged by, and the roadmap and phase drafts carry the owner's directions for how v0.2 closes, what v0.3 is measured by, and where v0.4 and v0.5 contradict the philosophy or accepted records. Nothing about the v0.2 design itself (routes, floors, the fixed room, knowing versus being reminded, the one hop, familiarity's place in it) changes here; that waits for the brief's amendment.
+- Carry out sections 2 and 3 of the v0.2 completion brief: the continuity situation catalog becomes the standard the ratified product philosophy is judged by, and the roadmap and phase drafts carry the owner's directions for how v0.2 closes, what v0.3 is measured by, and where v0.4 and v0.5 contradict the philosophy or accepted records. Nothing about the v0.2 design itself (routes, floors, the fixed room, knowing versus being reminded, the one hop, familiarity's place in it) changes here; the brief's amendment, section 4a, places those in its own design plan.
 
 ## Definition of Done
 - The catalog carries the brief's section 2 revision in full: the failures section (invented continuity, lost continuity, the mirror, and the month-long measure as a reading), the thirteen situations with their human shape and where the ideal AI character departs, the amended purpose paragraph, and the target variants for a topic, a group, a time of year and the self. The whole catalog is written as guarantees on what is in mind and how it is held, not as rules about what the character says: existing restriction-shaped statements are reworded into that form without changing what their situation tests.
 - Each philosophy statement named in the discussion notes' mapping (the 2026-10-16 "Layer 2 opened" entry of `docs/coding-agent/briefs/active/v0-2-completion-notes.md`) has at least one situation, shown by a mapping table in the task report.
-- The roadmap and the phase drafts carry the brief's section 3 changes and no others at that altitude, as Task_2's acceptance lists them. One section 3 change is open against its pass condition and carried to the amendment: familiarity's move to the phase that needs it (v0.2's design text names familiarity, and standing against familiarity is under re-examination).
+- The roadmap and the phase drafts carry the brief's section 3 changes and no others at that altitude, as Task_2's acceptance lists them. One section 3 change is open against its pass condition and carried to the amendment: familiarity's move to the phase that needs it: section 4a makes familiarity part of v0.2's recall design ("Familiarity decides what a thing brings, not how the cue was given"), so the 4a design plan edits v0.2's design text and the roadmap's familiarity rows, and section 3's pass condition for familiarity is met there.
 - The record that the roadmap's removal of the fact-acceptance machinery departs from (ADR-D-0005's deferral) has a proposed successor for the owner to accept or decline.
 - The owner accepts the revised catalog and the revised roadmap sections (human-only, the brief's pass conditions).
 
@@ -25,7 +25,7 @@
 
 ## Scope / Non-goals
 - Scope: `docs/design/continuity_situation_catalog.md`; `docs/roadmap/development_roadmap.md`; the phase drafts for v0.2 (its closeout, its order, and pointer lines naming another phase), v0.3, v0.4 and v0.5 under `docs/roadmap/roadmap-phases/`; one proposed design record.
-- Non-goals: the v0.2 design and its records (the amendment's), familiarity's placement included, since v0.2's design text names it (draft line 194, roadmap 1347) and standing against familiarity is under re-examination; the closeout reading's own probes, store and arms (planned after recall and the renderer are frozen, as the brief requires); editing any accepted record; the philosophy, the brief and the notes (Counsel's); any code or evals change; v1.0's definition beyond what the phase drafts' changes force.
+- Non-goals: the v0.2 design and its records (the amendment's), familiarity's placement included, since section 4a places it in v0.2's recall design and the 4a design plan carries it; the closeout reading's own probes, store and arms (planned after recall and the renderer are frozen, as the brief requires); editing any accepted record; the philosophy, the brief and the notes (Counsel's); any code or evals change; v1.0's definition beyond what the phase drafts' changes force.
 
 ## Design
 - Chosen: three documentation tasks with disjoint files, written from the brief's text on disk, each reviewed for altitude against the brief and the philosophy; no alternative required.
@@ -118,10 +118,51 @@
 ## Progress Log (append-only)
 - 2026-10-16: plan drafted under the v0.2 completion brief, from revision `785391cf` (the brief and the ratified philosophy).
 
+- 2026-10-16: plan-draft value audit dispatched at `6fa3b094` (plan at 1182deea), text verbatim: "You are the value auditor. Read references/value-audit-mandate.md of the orchestration-harness skill and follow it exactly. Position: plan draft. Plan: docs/coding-agent/plans/active/v0-2-catalog-roadmap-plan.md. Governing brief: docs/coding-agent/briefs/active/v0-2-completion-brief.md. Changes since: none."
+- 2026-10-16: verdict as returned (comparison lines in the readings file). Position: plan draft. Documents read: the plan; the brief; the philosophy (pointer line common.md:13); its companion; common.md (Standing Approvals at HEAD: the Counsel entry "pending", not in effect, no item relies on it). Read to understand items, never as support: ADR-D-0005, ADR-D-0035's title and decision lines, the catalog's headings and purpose, the roadmap's v0.4 and v0.5 rows, gist lines of the v0.3 and v0.5 drafts, the record number listing (highest ADR-D-0039). Notes never opened; readings opened once after grading. Product basis: philosophy (companion, second ratification) and the brief, section 8, 4a at line 63. Not audited: the engineering side (no document). Missing inputs: none. Value documents changed in range: none.
+  - DoD: catalog carries section 2 in full, guarantees throughout | maps to the brief | cited | brief s2 and its means "is written throughout as guarantees ..." | -
+  - DoD: mapping table | maps to the brief | cited | brief s2 pass condition | -
+  - DoD: roadmap carries s3 and no others; familiarity open and carried | maps to the brief | inferred | extends brief s3 "Familiarity and gist consolidation move down ..." and its pass condition, with 4a "Familiarity decides what a thing brings ..." and line 63 "waits on nothing"; the plan's reason was stale: the destination is decided, what remains is sequencing, cheap to undo and openly left unmet | -
+  - DoD: proposed successor to ADR-D-0005's deferral | maps to the brief | inferred | extends brief s3 removal statement and 4a's "records the Orchestrator proposes and the owner accepts"; cheap to undo | -
+  - DoD: owner accepts catalog and roadmap | maps to the brief | cited | brief s2 and s3 human-only conditions | -
+  - Planner-added: mapping table uncommitted | maps to the brief | cited | brief s2 pass condition | -
+  - Planner-added: identifiers stable | maps to the brief | inferred | extends s2 "adds thirteen situations"; cheap to undo | -
+  - Planner-added: roadmap cites by the brief's names | maps to the brief | inferred | extends s3 altitude line; cheap to undo | -
+  - Planner-added: near-neighbours cross-referenced | maps to the brief | inferred | extends s2; cheap to undo | -
+  - Planner-added: Task_3's record | maps to the brief | inferred | as the ADR-D-0005 DoD item | -
+  - Planner-added: stop and report on an unseen record conflict | maps to the brief | inferred | extends s1 governance; tightens | -
+  - Non-goal: v0.2 design and records, familiarity included | maps to the brief | cited | s4 proceeds list; 4a line 55 | -
+  - Non-goal: the reading's probes, store, arms | maps to the brief | cited | s3 | -
+  - Non-goal: editing any accepted record | maps to the brief | inferred | extends 4a line 55; tightens | -
+  - Non-goal: the value documents | maps to the brief | cited | s1; line 13 | -
+  - Non-goal: code or evals | maps to the brief | cited | s4 | -
+  - Non-goal: v1.0 | maps to the brief | cited | s3 "at the altitude stated and no further" | -
+  - Design | internal mechanics | not audited | - | -
+  - Context: both means built as written | maps to the brief | cited | s2 means; s3 means (line 30, s8 framing) | -
+  - Context: the notes' Layer 2 entry as the checklist only | maps to the brief | cited | s2 pass condition | -
+  - Integration | internal mechanics | not audited | not irreversible; no merge to a shared branch; s5's merge constraint untouched and its condition met | -
+  - Task_1 | maps to the brief | cited | s2 | -
+  - Task_2 | maps to the brief | cited | s3 (reading, four conditions, limitation rule; v0.3 measure and DoD gains; attribution's core; time in experience; v0.4 and v0.5), s5; ADR-D-0035's assertions kept apart on the brief's exact set and philosophy 8.2 | -
+  - Task_2 sub-item: conditional ADR-D-0040 citation | maps to the brief | inferred | extends s3; cheap to undo | -
+  - Task_3 | maps to the brief | inferred | as the ADR-D-0005 item; acceptance human-only | -
+  - Decision Log: ADR-D-0005 ruling | maps to the brief | cited | s3 "removed from the roadmap rather than kept conditional" | -
+  - Decision Log: familiarity waits | maps to the brief | inferred | as the DoD item | -
+  - Decision Log: gist reading | maps to the brief | inferred | extends s3; the added-not-substituted part cited on s3's DoD gains and philosophy 8.2 | -
+  - Decision Log: time in experience | maps to the brief | cited | s3 | -
+  - Decision Log: pointers follow moves | maps to the brief | inferred | extends s3 | -
+  - Decision Log: identifiers, names, cross-references | maps to the brief | inferred | as above | -
+  - Decision Log: "throughout" | maps to the brief | cited | s2 means | -
+  - Decision Log: order | maps to the brief | cited | s3 means and s5 | -
+  - Decision Log: re-review fixes | as graded above; the number is internal mechanics, not audited (ADR-D-0040 next free) | -
+  - Human-only conditions pending: the owner accepts the revised catalog; the owner accepts the revised roadmap sections.
+  - Scenarios: none
+  - No item ask-now or ungraded. Inferred calls journaled: familiarity's sequencing; the proposed record; identifiers stable; names cited; cross-references; the stop-and-report rule; no record edits; the conditional citation; the gist reading; pointers follow moves.
+- 2026-10-16: the auditor's note outside the record applied as wording: the familiarity reason names 4a and the 4a design plan as the unit that carries familiarity's move. No grade changes; the closeout audit grades the changed text.
+
 ## Decision Log (append-only)
 - 2026-10-16 Decision: the plan review of b3d03f6b (CHANGES REQUESTED) applied, with these rulings.
   - ADR-D-0005: the roadmap carries the owner's ratified removal, and Task_3 proposes the record that makes it the outcome of ADR-D-0005's revisit, for the owner to accept. Holding the v0.4 portion instead was rejected: the brief states the removal outright, and the record is the owner's act either way.
-  - Familiarity's placement waits for the amendment: v0.2's design text names it, and standing against familiarity is under re-examination (the brief's section 4).
+  - Familiarity's placement goes with the 4a design plan: section 4a places familiarity in v0.2's recall design, so that plan edits v0.2's design text and the roadmap's familiarity rows; this plan leaves them.
   - Gist consolidation: "move down to the phases that need them" is read as the later phase where its use arises. v0.3's episode and day gists stay, since its reflection is built on them and ADR-D-0027 and ADR-D-0033 rest on them; what sits in v0.5 alone is the long-horizon consolidation of periphery into gist, the decade of gists; the peak-and-end item is added to v0.3's compression, not substituted for it. Cheap to undo; logged for the closeout audit.
   - Time counted in experience is written into the roadmap as a decision for v0.3's planning, which judges "cheap" from a cost reading over the trace store; this plan does not judge it.
   - A pointer in v0.2's text naming another phase (for example attribution fields "(v0.4)") follows the move, and is not design text.

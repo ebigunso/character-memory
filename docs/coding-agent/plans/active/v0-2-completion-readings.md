@@ -63,4 +63,9 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
 - Decision Log: order renderer, reading, re-baseline, paid runs | covered | brief sections 3 and 5.
 - Decision Log: re-review fixes (gists kept, ADR-D-0040, familiarity open, assertions kept apart) | covered | brief sections 3 and 4; ADR-D-0027, ADR-D-0033, ADR-D-0035 unchanged.
 
+- Verdict comparison for the catalog and roadmap plan (2026-10-16), as returned:
+  - Reading compared: Goal agrees (reason rests on a wait the brief says is over); DoD catalog agrees; DoD mapping agrees; DoD roadmap with familiarity open diverges (Orchestrator covered on section 4's hold; auditor inferred, 4a ratified and section 4's wait closed, so the deferral is sequencing); DoD ADR-D-0005 successor agrees; DoD owner acceptance agrees; mapping table agrees; identifiers stable agrees; cites by brief's names diverges (covered; auditor inferred); near-neighbours agrees; Task_3 record agrees; stop and report diverges (covered on section 1; auditor inferred); Non-goals agree except editing accepted records (covered; inferred) and the familiarity clause; Task_1, Task_2, Task_3 agree; DL ADR-D-0005 ruling diverges (Orchestrator extends; auditor cited); DL familiarity waits diverges (covered; inferred); gist, time, pointers, identifiers, "throughout", order agree; re-review fixes agree except the conditional ADR-D-0040 citation (covered; inferred). Design, Integration, Context unread by the Orchestrator.
+  - Findings compared: none found.
+  - Correction inside the run: the familiarity items' reason reworded to name 4a and the unit that carries the move.
+
 ## Findings
