@@ -124,6 +124,10 @@ Unratified. Nothing here is grounds for a plan or a grade, and no entry is the o
 
 - 2026-10-16. The owner: "Open layer 3: the v0.2 design and its records." Records read: ADR-D-0022 (routes per cue kind, admission floor per kind), ADR-D-0023 (purpose from memory, one bounded hop), ADR-D-0029 (scene as perceived), ADR-D-0038 (no gating), ADR-D-0039 proposed (setting key as reminder), ADR-I-0036 proposed (one reserved slot per kind). Six load-bearing choices identified for the owner: the fixed room with reserved seats; standing by road (knowing versus reminded) against familiarity; the one hop against gathered situations; admitted_by roads against the ingredients of weight and the three absence states; the topic road always returning nearest matches; time as clock.
 
+- 2026-10-16. On the fixed room (choice 1), the owner: "Revise the way things are recalled, to fit with how we defined the philosophy to be." Direction: recall returns a few situations by weight down to the application's bound, weight made of comparable ingredients, no reserved seats per cue kind; ADR-D-0022 to be replaced, ADR-I-0036 and ADR-D-0039 returned; choices 2 to 5 follow (familiarity decides standing; situations gathered by shared subject and thread within a bound; ingredients and absence states reported; the topic road can return nothing); time stays the clock in v0.2. Engineering view requested from a GPT-family model through cm-researcher; a Claude Researcher sizes the rework of the open stack.
+
+- 2026-10-16. Stack sizing (Researcher, main..code tip, 110 files, +29,022/-6,712). Standing: storage and schema (~5,500 lines: scene on every memory, offsets, notions and known-as, obligations with actor, counterpart and due, write turn, write warnings, vector identity, ObservedIn, the new graph queries); time's substance (~2,400 lines: as-of cut, elapsed, due by local day, anniversary detection) with its road-and-floor role gone. Removed as mechanism: recall selection and room (~4,500 lines in retrieve.rs, retrieve/scene.rs, state.rs, activity.rs, retrieval_selectivity.rs, graph_expansion.rs: roads, floors, turns, root key, section scoring, standing by road). Rewritten: the result contract (pack with nine sections and limits becomes situations with weights, ingredients and three absence states); the renderer as specified (no code exists). Tests: ~15,000 lines, the floor, scene-standing, reminder, scope-rounds and section-cap tests lose their meaning; obligation, resolution, lifecycle, scene, write-turn, notion tests stand. Records: ADR-D-0022 replaced; ADR-I-0036 and ADR-D-0039 returned; ADR-D-0004 (typed sections) and ADR-I-0006 (per-section caps) also contradicted, not yet named in the direction, need a ruling; ADR-D-0023 strengthened; ADR-D-0009, -0018, -0024, -0027, -0029, -0033, -0034, -0037, -0038, ADR-I-0010, -0024, -0026 intact. Evals: the cue-floor calibrator, consolidation and residual families and the two calibration evidence sets lose meaning; the situated fixtures (carried by reason, omitted by cause, scenes reported), the obligations and time families and the unlived-topic probes keep it. Raised in value: the scene, obligations, elapsed-since, the ubiquity measure (the seed of familiarity), the reference resolution states, the write path, the situated harness.
+
 ## Facts (from the roadmap read, 2026-10-15)
 
 - The compartmented design is set in the v0.2 design draft itself (`docs/roadmap/roadmap-phases/v0_2_scoped_continuity_reflection.md`, section 2): "Nothing scores every memory, so each cue kind has its own route for finding candidates, and each route has an admission floor in the pack so no cue kind can starve another", and "Surfaced state re-cues one bounded hop: an open loop pulls the counterpart's objections". The Orchestrator's 83 decisions refine this design; they did not originate it.
@@ -141,3 +145,109 @@ Unratified. Nothing here is grounds for a plan or a grade, and no entry is the o
 
 - Remaining work as of the 2026-10-15 end-of-day handoff: renderer (memo and runnable example, with its paired evals change), residuals (subject-state read, statistics recovery, busy-occasion order), evals Task_5 step 4 and the Task_6 re-baseline, the closeout benchmark runs (four paid runs, once, on the final tip), phase closeout, the decisions presentation, merges.
 - The product philosophy is named in the rules (`docs/project_philosophy.md`, on the renderer plan branch at 22584cb2) and has no companion or ratification record yet.
+
+## Consulting view, kept verbatim (GPT-6 via agmsg, cm-researcher, 2026-10-16; file .agent-work/researcher/recall-redesign-engineering-view.md)
+
+> **Model: GPT-6 (Codex; a more specific runtime variant is not exposed to this session).**
+> **Route:** agmsg, cm-researcher. **Date:** 2026-10-16. **Status:** advice only; no decision or implementation authority.
+>
+> I favor replacing reserved record slots with situation-level selection, but common ingredients do **not** eliminate starvation. They remove one scoring defect. Candidate loss, duplicate situations, incomplete gathering, and limited output remain separate problems.
+>
+> I read the ratified philosophy in full, the v0.2 draft, ADR-D-0022, rulings 39–62 and relevant later entries. ADR-I-0036 is absent from the current checkout; I read its proposed version at the handoff's v0.2 baseline `ac41e5c0`. I also read the subject-state diagnostic. Recommendations below are engineering hypotheses, not measured improvements.
+>
+> ## 1. Weight without reservations
+>
+> Keep multiple candidate searches: an exact person lookup and a topical similarity search answer different questions. Drop their entitlement to output slots. Give active searches bounded opportunities to produce compact situation candidates before final selection; computational scheduling is not a promise to admit their results. Report when a search did not run or exhausted its budget.
+>
+> First establish **why this situation belongs to this moment**. Then weigh it. Otherwise a highly salient unrelated event beats an ordinary answer to the question. Similarity remains retrieval evidence and an admission/calibration input; removing it from weight must not remove relevance.
+>
+> My smallest baseline would expose the ingredients and provisionally order eligible situations by `W = M + R + O + P`:
+>
+> - `M`: the situation's evidence-grounded importance, on one shared anchored 0–1 scale. Report surprise separately; do not add it again if salience already includes it.
+> - `R = 1 / (1 + d)`, where `d` counts distinct experiences since the situation's latest substantive event/support. This is a deliberately simple experimental baseline, not an asserted human time law.
+> - `O`: 0 without an unsettled obligation, 0.5 while pending, 1 when due and unsettled, interpreted against the scene's calendar.
+> - `P`: 1 when an involved party is present, otherwise 0.
+>
+> These provisional coefficients express a policy and require comparison, not ratification by arithmetic. Missing importance/surprise is unknown, not evidence of insignificance. Preserve that distinction in the result even if ordering uses a conservative fallback. “Unsaid” and affective valence should remain descriptive ingredients, not automatic bonuses. Use situation-level features, never a sum of its record scores; duplicating supporting records must not manufacture weight.
+>
+> A loud topic can still supply many distinct high-weight situations. A busy person can still consume candidate work before another is inspected. No bounded selector guarantees representation of every cue without imposing some coverage preference. If the measured failures require one, discuss that preference openly rather than hiding floors inside coefficients.
+>
+> Measure candidate recall, situation grouping, final situation coverage, unrelated admissions, and rendered behavior separately. Start with the existing overlapping office/topic cases, two people with separate obligations, duplicated accounts, old high-salience matters, keyless scenes, and empty queries. Compare against topic-only and each-cue-removed controls.
+>
+> Cormack, Clarke, and Büttcher's **RRF (2009, SIGIR)** combines incompatible ranking scores effectively on IR benchmarks. It is a useful comparator, not my default: rank fusion still rewards the best item in an entirely irrelevant list and does not establish absence. [Paper](https://cormack.uwaterloo.ca/cormack/cormacksigir09-rrf.pdf).
+>
+> ## 2. Gathering the situation
+>
+> Start with a **query-time view over existing anchors**, not a new universal situation entity. An existing thread or open loop anchors a matter; an occasion anchors a recollection. Shared Bob alone must not merge Bob's unrelated matters.
+>
+> Use a small, explicit retrieval recipe:
+>
+> 1. Read the anchor's current version, lifecycle, subjects, and compact ordering ingredients.
+> 2. Gather its supporting episodes, corrections/resolution, and recorded actions through named typed relations.
+> 3. Search for unlinked evidence through selective intersections: Bob **and** the relevant project/topic/thread or constrained occasion. Similarity can propose additional evidence within that neighborhood.
+> 4. Present the assembled account with the origin and connecting path of each contribution; distinguish explicit membership from inferred relevance.
+>
+> Thus Bob's objection can join the promise without a direct promise link if both are indexed about the same plan. If the record contains neither a usable shared anchor nor recognizable content, bounded retrieval cannot guarantee discovering the relationship. Better consolidation/indexed aboutness is then required; “everything that bears” cannot be guaranteed by a clever join.
+>
+> A provisional semantic association must not become durable relationship truth or open Bob's entire history. This retains the valuable part of reminder-leaf behavior without equating every exact key with unrestricted expansion.
+>
+> Bound visited candidates, fetched evidence, and returned detail separately. A fixed recipe may cross several typed edges; “one hop” alone says little about cost when a node has thousands of neighbors. Select compact candidate situations before hydrating full episodes. Return a coherent synopsis, evidence references, and an explicit incomplete-gathering indication with a continuation. Do not silently call a truncated account whole.
+>
+> ## 3. Familiar ground
+>
+> Ubiquity measures **poor discrimination**, not familiarity by itself: one person appearing in both of two experiences and in 10,000 experiences has the same share. Combine the existing share with distinct-experience count and contact history before calling something familiar.
+>
+> For familiar anchors, read current unsettled matters and recorded changes since the relevant encounter/baseline. Keep stable dispositions as compact background with their evidence reachable. Do not fill an empty result with a ceremonial latest meeting.
+>
+> This needs indexed/rebuildable current-matter and change lookups, not an annual scan. The current-head or change projection is derived acceleration, never a second authoritative history. Refresh it with relevant writes/corrections and expose unhealthy coverage.
+>
+> “New” must be relative to a recorded experience or baseline, not the last retrieval call: reading memory must not consume novelty. Do not identify novelty with recency alone; routine new episodes can remain background, and old unresolved matters can remain active. Surprise requires a recorded expectation or a justified inference, not merely a rare vector.
+>
+> An explicit touch on history bypasses this foreground preference and follows the structural lookup. Familiarity changes default presentation, never structural availability. A heuristic that hides history without that path would contradict the philosophy.
+>
+> ## 4. Saying nothing honestly
+>
+> The three states need a **scope of evidence**:
+>
+> - **Nothing found:** attempted routes returned no supported candidate; incomplete coverage, ANN misses, or unavailable evidence remain possible.
+> - **Thin/uncertain:** a name resolves ambiguously, evidence is scant, or an occasion is connected only by resemblance. State exactly which.
+> - **Verified absence:** an exhaustive, healthy structural check establishes no matching record for a stated identifier/predicate/range at a stated snapshot.
+>
+> “No current known-as assertion for this spelling” is provable under those conditions. “I never met that person” is not: they might have another name or no recorded name. RDF and an exact lookup do not make the world closed. Operational failure, stale projections, and truncation are coverage facts; none can produce a flat “no.”
+>
+> For vectors, start with an abstaining threshold calibrated on **the intended embedder and search surface**, using held-out paraphrases, genuinely absent matters, near misses, repeated surroundings, and corpus-size prefixes. Measure missed valid memories alongside false associations. A universal cosine cutoff, top-one/top-two gap, or per-query min–max normalization is not credible.
+>
+> Calibrate the **maximum returned score on null queries**, not random pair scores. Even with independent comparisons, per-comparison false-positive probability `p` yields `1-(1-p)^N` probability of at least one false hit across `N` items. Actual neighbors are dependent; measure the deployed search, including its approximation and filters, instead of treating that formula as a guarantee. Recalibrate after embedder, corpus, or surface changes; record calibration coverage when it is exceeded.
+>
+> Reimers and Gurevych **(2021, ACL-IJCNLP)** document increasing false positives for dense low-dimensional retrieval as indexes grow. Radovanović, Nanopoulos, and Ivanović **(2010, JMLR)** analyze hubness. Conneau et al. **(2018, ICLR)** improve bilingual retrieval with CSLS density correction. None establishes a reliable “no autobiographical memory” detector. I would measure hub concentration first and test correction only if it explains failures; it adds neighborhood statistics and can demote genuinely common relevant memories. [Dense retrieval](https://aclanthology.org/2021.acl-short.77/), [hubness](https://www.jmlr.org/papers/v11/radovanovic10a.html), [CSLS](https://arxiv.org/pdf/1710.04087).
+>
+> Pass abstention and coverage into the ordinary result, not just a debug trace. Also test whether the model obeys them; a calibrated retriever does not guarantee calibrated speech.
+>
+> ## 5. Cost and completeness
+>
+> Two guarantees should be distinct: **bounded foreground recall** and **complete structural access through resumable retrieval**. Returning every record about Bob necessarily costs at least the number returned. It cannot be both complete in one response and independent of years of history.
+>
+> Bound candidate-search work, compact metadata rows examined, evidence hydration, and output bytes. A result-count limit does not necessarily bound backend work. Use indexed lookups and stable cursors tied to a snapshot/version; paging must neither skip eligible records nor silently stop at an internal fanout cap. Any narrowed structural query states its predicate. Approximate semantic coverage remains separately labeled. Record graph/vector coverage watermarks: vector lag can explain a miss and cannot establish absence.
+>
+> The repository already supplies a warning: ruling 67 found a limited SPARQL query far slower than compact-row selection in Rust. The newer subject-state diagnostic located approximately 8.45 seconds versus 0.18 seconds for one large membership table versus bounded tables at 2,000 members. These are diagnostic observations, **not accepted production timings or proof of a particular Oxigraph internal cause**. Applying caps independently to those batches would change selection.
+>
+> Start with existing compact reads, batched joins, one global selection, and hydration only afterward. Where compact scans themselves grow too costly, maintain narrowly justified current-matter/change projections; benchmark their write and correction cost too. Qdrant's returned `k` does not by itself establish constant search latency.
+>
+> Measure cold/warm p50/p95/p99, scanned rows, hydrated bytes, and index/update costs at increasing years-sized stores and skewed hubs. Do not invent a millisecond promise before this measurement.
+>
+> ## 6. What I would keep, drop, and challenge
+>
+> **Keep:** scene cues before topic; graph authority and vector candidates; separate scene/content surfaces; provenance and per-road explanations; distinction between aboutness and presence; suppression/supersession semantics; missing-statistics fallback; compact-row selection; existing pressure measurements as regression evidence. Retain recipe-specific non-expansion for weak associations.
+>
+> **Drop:** reserved output slots by cue kind, mandatory filling, category section caps as the semantic result, record-count-based situation weight, and inherited vector strength as relevance proof. Revisit early candidate caps alongside final ranking; otherwise the new selector never sees what it should select.
+>
+> **Disagreements:** shared numeric ranges do not make importance objectively comparable. “A few situations” still requires a selection policy and a resource budget. “Everything bearing on it” is an aspiration unless membership is discoverable and pagination is allowed. Exact absence concerns represented records under stated coverage, not lived reality. “No verdict about action” is coherent; “no judgment in recall” is not. The revised §8.1 already acknowledges the latter distinction.
+>
+> I would first compare a deterministic situation view with existing behavior before adding learned ranking, query-time generative clustering, or spreading activation. That is a recommendation for the decision-makers, not work undertaken here.
+>
+> Only this requested reply was written. No implementation, benchmark, or independent verification of recorded timings was performed; the composition and performance improvements remain unvalidated.
+>
+
+## Decisions (continued)
+
+- 2026-10-16. AMENDMENT RATIFIED. The owner: "I ratify the design amendment, section 4a of docs/coding-agent/briefs/active/v0-2-completion-brief.md, on those seven framings." Layer 3 complete. The hand-over of the amendment goes to the Orchestrator as the brief hand-over did; the records (ADR-D-0022, ADR-D-0004, ADR-I-0006 to replace; ADR-I-0036, ADR-D-0039 to return) are the owner's reserved acts and reach the owner as documents when the Orchestrator proposes the replacements.
