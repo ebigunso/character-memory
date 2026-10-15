@@ -954,7 +954,6 @@ Prevention:
 Evidence:
 - `src/adapters/qdrant/store.rs` `service_wrong_width_upsert_fails_before_contacting_qdrant`; `docs/coding-agent/plans/completed/facade-contract-gaps-plan.md` Progress Log 2026-09-17.
 
-<<<<<<< HEAD
 ## 2026-10-15 - A plan-approval waiver does not waive the plan review or the value audit [tags: orchestration, planning, gates]
 
 Symptom:
@@ -1005,7 +1004,7 @@ Prevention:
 
 Evidence:
 - `docs/coding-agent/plans/active/v0-2-residuals-plan.md` and `v0-2-catalog-roadmap-plan.md`, Decision Logs of 2026-10-16.
-=======
+
 ## 2026-10-16 - Read push output, and keep machine paths out of committed records [tags: orchestration, git, privacy]
 
 Symptom:
@@ -1022,4 +1021,3 @@ Prevention:
 
 Evidence:
 - The 2026-10-16 commits on the residuals, catalog and situated recall plan branches.
->>>>>>> 0dbbee12f3c8e453e655825f37ab9cd2939d20f9
