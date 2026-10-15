@@ -8,6 +8,8 @@ Until this phase every lasting memory is authored by the caller, so the structur
 
 The answer is the human one. Experience leaves a literal trace at once, cheaply and without judgment. The character can reach that trace immediately, by what it was about as well as by when and with whom. Afterward, when there is time, reflection decides what lasts. Structure within one event is immediate; structure across events is what consolidation does.
 
+What reflection is for: it shapes and persists the character's own thoughts and tendencies, which further reinforce how it behaves later. A character with such a memory behaves in ways its lived experience shaped; a fresh session given the transcript behaves generically with the same facts. That difference is the phase's measure. The catalog's the same situation, two characters, is read against the strongest control, the same model with the whole transcript in context, and what is sought is behaviour shaped by lived experience against generic behaviour with the same facts.
+
 | | Short-term store, waking | Durable memory, after reflection |
 |---|---|---|
 | Holds | Literal trace, its scene, its index | Gist, observations, state, patterns, signals |
@@ -73,14 +75,16 @@ the day's pass     the character's own day: a first-person gist, the small encou
 ## 3.2 Outputs
 
 ```text
-gist episodes, each with its scene, the identifiers of the entries it consolidated, and every source pointer those entries supplied; the gist is the character's own account and says how the episode felt to it where the character's own entries, its words, actions, thoughts, or notes, show it, and states no feeling where they do not (ADR-D-0033); an episode may be marked unfinished
+gist episodes, each with its scene, the identifiers of the entries it consolidated, and every source pointer those entries supplied; the gist is the character's own account and says how the episode felt to it where the character's own entries, its words, actions, thoughts, or notes, show it, and states no feeling where they do not (ADR-D-0033); compression keeps the peak and the ending, the cause and the central people, in full, and sends the surroundings to gist, so a tense talk that ended warmly is remembered as warm; what broke with expectation is what is kept, and the ordinary merges into gist with each occasion still findable; an episode may be marked unfinished
+dispositions, one toward a thing with its felt tone, aggregated from the episodes' own accounts, with those episodes reachable; the disposition is handed to recall without its reason, the reason one hop away (the flinch before the reason)
+the carried state: the residue of what just happened and how things have been lately, written so that a heavy week reaches a scene with unrelated people
 notions and beliefs about them, for the people, places, and things the trace names (ADR-D-0034): a reference taken to be someone already known attaches to that notion, one that is not forms a new notion, and what a notion is called, what kind of thing it is, that two notions are of one thing, that one place lies within another, are beliefs with evidence; reflection never merges, splits, or deletes, and each such output points at where the reference appears in an entry's text or scene
 observations, each naming its entry and quoting the words it rests on, with their register and who said it for speech, who acted, with no register, for an event, and how someone seemed, as the character's own impression; time and scene are copied from the entry, the character's own entries attribute to the character by copying, and who spoke in a perceived entry is judged, weighing any speaker hint, and recorded as judged
 the scene as consolidated: beside what was given, the people and places reflection resolved, places containing one another where they do, each part marked as given or resolved
 restatements that name the memory they supersede: restated, never appended
 commitments and open loops with actor, counterpart, and due date or trigger
 resolutions as links, with their kind: fulfilled, cancelled, moot, expired
-promotions: a pattern citing its episodes; a belief resting on a persistent pattern; the count and the span are computed by the library
+promotions: a pattern citing its episodes, held as a tendency together with the situations it was seen in and its counterexamples, never as a label; a belief resting on a persistent pattern; the count and the span are computed by the library
 reappraisals: a change of heart about an earlier episode supersedes its account with a restatement that says both how it felt then and how it looks now
 weight, judged here from the trace
 a durable account of every span it consolidates, however quiet, so that releasing trace never leaves a span uncovered
@@ -100,6 +104,7 @@ grounding, gists               the entries consolidated, all of which are covere
 declared grounding             a caller-authored observation, episode, entity, or link declares the caller's own source reference; an observation also declares own or perceived, and the quote and speaker for speech, the actor for an event, or what gave rise to it for an impression; the rules read a declared basis as they read a recorded one, and the direct link operation admits a belief of sameness or containment only with grounding
 notions                        an output attaches to a notion graph authority already holds or forms a new one; an identity the model supplies that graph authority does not hold fails; no operation merges, splits, or deletes entities; a change of standing, sameness, or composition is the character's own conclusion and meets that bar, and a perceived claim alone never makes it
 what an observation records    speech with its register and who said it; an event with who acted and no register; an impression, how someone seemed, attributed to the character (ADR-D-0033)
+attribution's core             whether the character witnessed what the memory records or was told it, with the basis of that reading, copied from the entry where the scene shows it and judged otherwise; the character's own sayings and thoughts are a third kind, kept apart from both, so that a belief resting on one sighting and four retellings is held as exactly that (philosophy 8.2)
 what supports state            only a literal statement or an event
 the bar follows attribution    what a speaker stated may become state held as theirs from one literal observation; what the character concludes for itself needs a pattern citing several distinct episodes, a belief needs a persistent pattern, and a belief about itself meets the strictest bar
 the character's commitments    rest on its own speech or action entries, never on a note, a thought, or a perceived claim alone
@@ -145,6 +150,7 @@ the lookup measurement of section 2.2
 measurements with reflection in the loop that are deterministic and free of paid calls, which this library supports by reporting which prompt ran and by taking the model through a port a harness can replay
 benchmark results obtained through mechanical writes plus reflection rather than hand-authored ingestion, before the phase is judged complete
 the behavioral tier's first results: tact, discretion across scenes, retelling consistency
+the phase's measure: the same situation, two characters, read against the same model with the whole transcript in context; behaviour shaped by lived experience against generic behaviour with the same facts
 ```
 
 ---
@@ -179,6 +185,14 @@ A backlog is consolidated in order; a later reflection can supersede an earlier 
 A transcript of several people heard as one perceived stream yields observations whose attribution is recorded as judged, and a commitment of the character that cites only perceived entries fails validation.
 A deployment that supplies only the time, the entries, and free descriptions of the situation writes, recalls the same day, and consolidates into entities with no identifier from the application; the same place described in drifting words becomes one notion or notions joined by a belief that they are the same, and recall reaches what is held under each.
 Reflection beside concurrent recall and writes leaves a consistent supersession chain.
+Every observation and every memory reflection writes from it says whether the character witnessed what it records or was told it, with the basis of that attribution; the catalog's second-hand knowledge and being told about yourself (C3, C5) pass at the retrieval tier.
+Reflection aggregates, from the episodes' own accounts, a disposition toward a thing with its felt tone, with the episodes it rests on reachable.
+Reflection writes the state the character carries, the residue of what just happened and how things have been lately, and it reaches a scene with unrelated people.
+What lasts follows surprise: what broke with expectation is kept, and the ordinary merges into gist with each occasion still findable (the hundred Tuesdays).
+A tendency is held with the situations it was seen in and its counterexamples; a tendency without its situations fails validation.
+The character's own sayings are evidence of their own kind: a story told five times is held as retellings, apart from what was witnessed and what was told, and the tale does not grow.
+Compression keeps the peak and the ending, the cause and the central people, in full, and sends the surroundings to gist; a tense talk that ended warmly is remembered as warm.
+The phase is judged by the two-characters reading against the same model with the whole transcript in context, beside the benchmark results and the behavioral tier's first results of section 4.
 The guide page on when to write and when to reflect exists, and the example loop uses both.
 ```
 
@@ -192,8 +206,9 @@ a scheduler or background job in the library
 durable writes from the memory tool, from tool results, or from any unvalidated path
 trace text in graph authority or the durable vector store, beyond the bounded quote an observation keeps as part of itself (ADR-D-0028)
 reprocessing old scenes from source after their trace was consolidated and released, unless the application kept the source; what consolidation kept stays recoverable in full for as long as memory holds it, which an out-of-band purge can end, and the literal wording it let go is not
-validity intervals as structured fields and the fuller attribution work (v0.4); who-said-it on reflection outputs is in this phase
-connections across scopes, and which durable surfaces need vectors (v0.5)
+validity intervals as structured fields, and who else knows (v0.4); who-said-it and attribution's core, witnessed or told, are in this phase
+connections across scopes, the long-horizon consolidation of periphery into gist, and which durable surfaces need vectors (v0.5); this phase's episode and day gists stay here
+time counted in experience, unless this phase's planning finds it cheap over the trace store (section 8); otherwise it is the first named item of v0.4, and time stays the clock until then
 ```
 
 ---
@@ -220,6 +235,7 @@ what the store does as it nears the capacity it was given, short of dropping tra
 link and thread-membership confidence: settled, removed with the confidence on interpreted memory in the v0.2 schema groundwork (ruled 2026-09-20)
 whether a consumer can correct or forget a reflection-written memory with only what it was handed, given ADR-I-0020
 the consolidation protocol of section 3.6, including the conditional upsert the write path itself still lacks
+time counted in experience (philosophy 8.3): how long ago a thing seems and how far an old feeling still presses follow what the character has lived since, which the trace store records; the planning takes a cost reading over the trace store and decides, as a recorded decision, whether it is cheap enough to build here; if not, it is the first named item of v0.4
 ```
 
 Implementation records expected with the plan, each written when its contract is set: the short-term store's index and bounds, the release contract, the signal, and the output schema.

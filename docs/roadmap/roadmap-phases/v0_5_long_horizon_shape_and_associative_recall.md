@@ -2,7 +2,7 @@
 
 ## Status of this draft
 
-Reframed on 2026-09-17. The phase's first job is long-horizon shape without loss: currency at scale, consolidation of periphery into gist with provenance through the generation port, query-time associative activation over the existing graph with no persisted structure, and familiarity derived from evidence. Decay is not a mechanism (ADR-D-0018). The durable AssociativeUnit, AssociativeMembership, and AssociationSupport design below stays in force as the design for when durable association enters, which happens only when long-horizon evaluations show query-time activation alone misses or costs too much. The roadmap's section 16 governs where this body disagrees.
+Reframed on 2026-09-17 and corrected on 2026-10-16 under the v0.2 completion brief. The phase is the long horizon proper: a decade of gists, the long-horizon consolidation of periphery into gist with provenance through the generation port, which sits in this phase alone while v0.3's episode and day gists stay there as its input; recognition of a returning stranger; query-time associative activation over the existing graph with no persisted structure; and durable associative units only on measured demand; with currency at scale and familiarity derived from evidence. Decay is not a mechanism and there is no reinforce operation (ADR-D-0018): the decay and reinforcement policies the earlier draft carried have left it, and a membership's status changes only by a recorded maintenance decision with its support, never by elapsed time or by having been retrieved. The durable AssociativeUnit, AssociativeMembership, and AssociationSupport design below stays in force as the design for when durable association enters, which happens only when long-horizon evaluations show query-time activation alone misses or costs too much. The roadmap's section 16 governs where this body disagrees.
 
 ## Version intent
 
@@ -93,7 +93,6 @@ AssociativeMembership
 AssociationSupport
 QueryTimeActivation
 AssociationPromotionPolicy
-AssociationDecayPolicy
 ClusterSummary
 ```
 
@@ -132,7 +131,6 @@ cue_terms
 summary_text
 created_at
 updated_at
-review_after
 membership_materialization
 ```
 
@@ -161,7 +159,6 @@ membership_status
 member_role
 added_at
 updated_at
-review_after
 rationale
 ```
 
@@ -237,7 +234,7 @@ CorrectionChain
 CommitmentLifecycle
 ```
 
-Association support should be used to explain promotion, demotion, decay, or retrieval inclusion decisions.
+Association support should be used to explain promotion, demotion, retirement, or retrieval inclusion decisions.
 
 ## Association support over durable association scores
 
@@ -338,16 +335,13 @@ shared selective cue
 
 A membership must not be promoted solely because it shares a low-selectivity entity with the unit.
 
-## Decay and retirement policy
+## Retirement policy
 
-Candidate memberships should decay if not reinforced.
+A membership's status changes only by a recorded maintenance decision at consolidation, with the support that explains it; never by elapsed time, and never by how often it was retrieved (ADR-D-0018).
 
 Possible rules:
 
 ```text
-Candidate -> Retired
-  if not reinforced after review_after
-
 Candidate -> Rejected
   if judged noisy or contradicted
 
@@ -355,7 +349,7 @@ Active membership role -> Peripheral
   if the unit evolves away from that member but the membership remains valid
 
 Active -> Retired
-  if rarely retrieved, low salience, and no longer useful even as a peripheral member
+  if consolidation judges it no longer useful even as a peripheral member, with the support that says so
 
 Any membership remains in its status but becomes ineligible for retrieval
   if source memory is suppressed or deleted
@@ -419,14 +413,7 @@ score memberships
 include bounded top members
 ```
 
-After retrieval:
-
-```text
-reinforce only memberships actually included in final context,
-selected by reranker,
-used in answer,
-or marked useful by the application
-```
+After retrieval, nothing is written: retrieval is a reader, and what it included is evidence for consolidation only through the retrieval trace, if persisted retrieval footprints are found to be needed (roadmap section 16).
 
 During consolidation:
 
@@ -434,7 +421,7 @@ During consolidation:
 process dirty scopes or units
 promote candidate memberships
 demote weak active memberships
-retire stale candidate memberships
+retire candidate memberships whose support consolidation judges insufficient, as a recorded decision
 merge overlapping units
 split incoherent units
 update summaries
