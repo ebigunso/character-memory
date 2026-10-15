@@ -90,3 +90,4 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
 
 - 2026-10-16, catalog and roadmap plan: G10's first departure reads "empty only for a person" where the brief's clause reads "empty only for the AI"; the brief's reason clause and philosophy 8.3 support the catalog's reading. Reading: bears on the design. Escalated to Counsel as a value question on 2026-10-16; the G10 departure text is held as written until the answer.
 - 2026-10-16, catalog and roadmap plan: the catalog's purpose lists nine departures from human memory where philosophy 2.4 lists five (the four added are grounded in 7.4, 8.3, 10 and the brief). Reading: bears on the design (which departures the product declares). Noted to Counsel on 2026-10-16 with the G10 question; journaled as an inferred call marked direction for the closeout.
+  - 2026-10-16: Counsel corrected the brief's clause (its own error against philosophy 7.5); the catalog stands; the hold is released.
