@@ -953,3 +953,20 @@ Prevention:
 
 Evidence:
 - `src/adapters/qdrant/store.rs` `service_wrong_width_upsert_fails_before_contacting_qdrant`; `docs/coding-agent/plans/completed/facade-contract-gaps-plan.md` Progress Log 2026-09-17.
+
+## 2026-10-15 - A plan-approval waiver does not waive the plan review or the value audit [tags: orchestration, planning, gates]
+
+Symptom:
+- A four-task plan was written and its first wave dispatched within minutes, before its Reviewer plan review, before its plan-draft value audit and without a recorded research waiver. The same hour, a re-anchored plan was dispatched without the value audit its handoff named as a precondition.
+
+Root cause:
+- The decider asked to use spare worker capacity before a usage reset. Under that pressure the standing waiver of plan approval was read as covering the review and the audit, which it does not: the standing authorization says the plan reviews still run, and the value audit is a separate condition of autonomy.
+
+Fix applied:
+- The workers were told to finish the root-cause step and hold before writing any fix. The plan records the research waiver and the gate miss, each task's scope is narrowed from its root cause, and the plan review and value audit run before any fix is authorized.
+
+Prevention:
+- When the decider asks for speed, start with work that needs no new plan (tasks of plans already reviewed, measurement-only runs) while the new plan is reviewed. A new plan's workers may start only on a root-cause or research step that writes no fix, and the brief says so from the first message.
+
+Evidence:
+- `docs/coding-agent/plans/active/v0-2-residuals-plan.md` Research and Progress Log, 2026-10-15.

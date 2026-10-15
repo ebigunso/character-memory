@@ -24,7 +24,7 @@
 - Task_1 (subject-state read): the selector is `select_state` in `src/adapters/oxigraph/sparql_selectors.rs`. The trigger and due selectors beside it read the same scale in about 0.15 s, so the expected shape is the same bounded selection pushed into the query; the result must be identical.
 - Task_2 (statistics recovery): the statistics are derived from the graph, so they can be recomputed from it. The chosen recovery is a rebuild at open when the stored marker is unhealthy, in the composition path that already chooses the in-memory unhealthy fallback (`src/composition.rs` near 309). No new public call, because no application can know when to call it and a character should not need an operator to recover.
 - Task_3 (second person under activity pressure): the consolidation's principle 4 rounds among the scopes of one kind. The worker finds why the second person's state room shrinks when an activity is present (a shared budget, a round that counts the activity, or an order effect) and fixes the rule, not the count.
-- Task_4 (busy-occasion order): the selection must break ties by a key that does not depend on identifier order where identifiers carry no meaning (recorded time, then salience, then identifier as the last resort), or the worker shows the dependence is in input order the caller controls.
+- Task_4 (busy-occasion order): which observations of one occasion survive the fanout bound is decided by the link identifier order today (`select_links_touching` sorts refs by id, and `apply_fanout_limits_by_pair` keeps the first 16). The chosen key orders an occasion's eligible observation neighbours before the bound: salient first, then newest by memory time (the observation's own time, else its occasion's scene time, as `ParticipantOccasion::memory_time` defines), then identifier as the last resort. It is ruling 70's order for what is held about a present person, applied to what was observed at an occasion, so a character recalls the striking details of a busy occasion and, among equals, the latest. The same key orders both the pre-hydration path and the materialized plan. The salience comes from a compact projection beside the existing occasion metadata read, never from hydrating every candidate (ruling 67). Rejected: a general key for every relation (changes recall far beyond this route); sorting after hydration or at the pack (the discarded observations were never read); raising the bound (moves the cliff); time before salience (minutes within one occasion say less than salience about what a person keeps).
 
 ## Integration
 - Base: the renderer plan tip `ac41e5c0`, which carries the whole library stack through the prospective slice. The renderer's tasks touch no retrieval code, so the two lines run in parallel and are joined by plain merges before the closeout re-baseline.
@@ -49,7 +49,7 @@
 
 ### Task_2: A character whose recall statistics failed recovers on its own
 - type: impl
-- owns: src/composition.rs, src/adapters/stats/*, src/policy/retrieval_selectivity.rs (only if the marker path needs it), their tests
+- owns: src/composition.rs, src/adapters/stats/sqlite.rs, src/adapters/oxigraph/shared.rs (the two MemoryLink exclusions in the object hydrator only), src/adapters/oxigraph/tests.rs, and their tests
 - depends_on: []
 - acceptance:
   - A store marked unhealthy and reopened is healthy, with statistics equal to those a fresh build from the same graph gives.
@@ -75,11 +75,11 @@
 
 ### Task_4: What a busy occasion brings does not depend on identifier order
 - type: impl
-- owns: as Task_3
-- depends_on: [Task_3]
+- owns: src/policy/graph_expansion.rs (incident-neighbour ordering before the fanout limits, both paths); src/adapters/oxigraph/shared.rs (the occasion metadata handed to that ordering; not Task_2's hydrator lines); src/adapters/oxigraph/sparql_selectors.rs (the compact salience projection only; not Task_1's subject-state selector); their tests
+- depends_on: []
 - acceptance:
-  - The root cause and the tie key.
-  - The family that showed the dependence gives the same result in both identifier orders.
+  - The family that showed the dependence (the companion's busy-occasion residual, `calibrate_cue_floors --residuals-only`) selects the same observations in both identifier orders, and with equal salience they are the 16 newest.
+  - A test at the policy or adapter boundary shows the selected observation times in both identifier orders with the caps unchanged.
 - validation:
   - kind: command; owner: worker; "cargo fmt --check; cargo clippy --all-targets -- -D warnings; cargo test"
   - kind: review; owner: reviewer; "Tier D: the tie key carries meaning and identifier order is the last resort"
@@ -99,3 +99,13 @@
 - 2026-10-15 Decision: the decider chose these four residuals for v0.2 (ruling 81) and asked for them to run while Codex capacity is available. One plan with four tasks, not four plans: each task is small, and they share one base and one measurement pattern.
   - User approval: the decider chose the scope; plan approval is waived under the standing authorization.
   - Record proposed: none.
+- 2026-10-15 Decision: Task_2's root cause and graph read.
+  - Root cause: an unhealthy marker is persisted by `mark_unhealthy` and nothing ever clears it; composition opens the store unchanged, and selectivity skips counters while it is unhealthy, so one transient failure makes every later recall conservative, across reopens.
+  - Found while drafting: the graph object query selects links, but the shared object hydrator drops them (`src/adapters/oxigraph/shared.rs`, two filters), although the adapter already converts a link. A rebuild through it would lose explicit links (an entity's Involves link), so rebuilt statistics would not equal a fresh projection.
+  - Chosen: delete the two exclusions so a query that selects links hydrates them through the existing conversion. No port, public surface or stored shape changes, and a caller that does not ask for links gets what it got before. Rejected: a private all-links port method (a new contract for data the query already expresses); appending links only in `query_objects` (a second dispatch path, leaving the hydrator inconsistent with its own conversion); reading raw RDF from composition (bypasses the port).
+  - Reviewer checks the hydrator's callers: the derived-memory selectors pass only derived refs, and graph expansion rejects a link root and hydrates links on its own path.
+- 2026-10-15 Decision: Task_4's root cause and key, as the Design states. Captures at 31dc6923 ran twice, byte-identical: the reminder keeps 16 of 25 observations of the busy occasion, and in both identifier orders the kept set is exactly the 16 lowest identifiers, so the original order loses the newest detail and keeps the five oldest. Tasks 1, 2 and 4 touch different functions of `sparql_selectors.rs` and `shared.rs`; their branches are joined by plain merges.
+- 2026-10-15 Decision (proposed to the decider): drop Task_3.
+  - Root cause: Participant and Activity scopes are already ordered apart (`src/usecases/retrieve/state.rs`), and principle 4's round is correct. In the activity-pressure story the 12-seat derived section holds 4 activity and 5 topic beliefs (5 and 4 at floor 2), which leaves 3 seats for the people present; a round over 3 seats gives the first person 2 and the second 1. Without the activity, 4 seats give 2 each.
+  - Reading: what fills the seats is the section budget, and scene order breaks the odd seat. Two each would need a thirteenth seat or would evict an activity or topic belief that outranks the participant beliefs. Neither is a fix of a defect. The residual is withdrawn, and the consolidation's note is corrected by this entry.
+  - User approval: pending; the decider chose this residual.
