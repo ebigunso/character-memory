@@ -316,6 +316,7 @@ The two tasks share one crate, so they run in sequence, each as one pull request
 ## Progress Log (append-only)
 
 - 2026-10-16: the v0.2 completion brief governs this plan from revision `785391cf` (the brief and the ratified philosophy committed on this branch). Held under the brief's section 4: "the renderer's phrasing of standing and roads" waits for the amendment carrying the v0.2 design re-examination, so Task_1 (WIP `ae319921` on `feature/2026-10-15/renderer-memo`, report `.agent-work/worker/renderer-task1-report.md`) and Task_2 stay stopped with every proof input kept. The brief's section 3 puts this renderer and the example loop ahead of the evals re-baseline and the paid runs, so this plan resumes first once the amendment lands, and is re-anchored to it before any go.
+- 2026-10-16: the amendment landed (brief section 4a, committed at `a9e0daac`; Counsel's relays admitted standing by the owner in this session, 2026-10-16, choosing "Admit relays, standing"). It replaces "the recall selection and room, the result contract, the renderer as specified", so this plan does not resume as written: the memo's `Standing` vocabulary, roads and fixed sections are what 4a removes. A new plan for the 4a design carries what of the memo survives (the past tense for settled matters, labelled reminders, the stream of what happened) and supersedes this one; this plan then moves to completed as superseded. Task_1's WIP `ae319921` is kept until that plan says what it reuses.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 
