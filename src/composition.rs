@@ -10,7 +10,7 @@ use crate::config::{
     GraphStoreMode as ConfigGraphStoreMode,
     RetrievalStatsStoreMode as ConfigRetrievalStatsStoreMode, Settings, VectorStoreMode,
 };
-use crate::domain::MemoryId;
+use crate::domain::{MemoryId, MemoryObject, ObjectType};
 use crate::errors::{
     ConfigValidationError, ConfigValidationReason, CustomError, EmbeddingError,
     RetrievalStatsHealthCause,
@@ -19,8 +19,11 @@ use crate::memory::CharacterMemory;
 use crate::models::vector::EmbeddingInput;
 use crate::policy::RetrievalSelectivityPolicy;
 use crate::ports::embedder::MemoryEmbedder;
-use crate::ports::graph_authority::GraphAuthorityStore;
-use crate::ports::retrieval_stats::RetrievalStatsStore;
+use crate::ports::graph_authority::{GraphAuthorityStore, GraphObjectQuery};
+use crate::ports::retrieval_stats::{
+    retrieval_stats_edges, retrieval_stats_object_states, RetrievalStatsHealthState,
+    RetrievalStatsStore,
+};
 use crate::ports::vector_candidate::VectorCandidateStore;
 
 pub(crate) struct MemoryComposition {
@@ -196,7 +199,7 @@ impl CharacterMemory {
                 Box::new(store)
             }
         };
-        let stats_store = retrieval_stats_store(&settings)?;
+        let stats_store = retrieval_stats_store(&settings, graph_store.as_ref()).await?;
         let fanout_budgets =
             settings
                 .get_retrieval_fanout_budgets()
@@ -299,13 +302,21 @@ fn preflight(
     Ok((embed_provider, vector_size))
 }
 
-pub(crate) fn retrieval_stats_store(
+pub(crate) async fn retrieval_stats_store(
     settings: &Settings,
+    graph_store: &dyn GraphAuthorityStore,
 ) -> Result<Box<dyn RetrievalStatsStore>, CustomError> {
     match settings.get_retrieval_stats_store_mode() {
         ConfigRetrievalStatsStoreMode::Sqlite => {
             match SqliteRetrievalStatsStore::open(settings.get_retrieval_stats_path()) {
-                Ok(store) => Ok(Box::new(store)),
+                Ok(store) => {
+                    if matches!(store.health().await, Ok(health) if health.state == RetrievalStatsHealthState::Unhealthy)
+                    {
+                        // Failed recovery retains the original marker and conservative retrieval.
+                        let _ = rebuild_retrieval_stats(&store, graph_store).await;
+                    }
+                    Ok(Box::new(store))
+                }
                 Err(error) => Ok(Box::new(InMemoryRetrievalStatsStore::unhealthy(
                     RetrievalStatsHealthCause::StoreInitialization { error },
                 ))),
@@ -315,10 +326,59 @@ pub(crate) fn retrieval_stats_store(
     }
 }
 
+async fn rebuild_retrieval_stats(
+    store: &SqliteRetrievalStatsStore,
+    graph_store: &dyn GraphAuthorityStore,
+) -> Result<(), CustomError> {
+    let objects = graph_store
+        .query_objects(&GraphObjectQuery::by_types(
+            vec![
+                ObjectType::Episode,
+                ObjectType::Observation,
+                ObjectType::DerivedMemory,
+                ObjectType::MemoryLink,
+            ],
+            None,
+        ))
+        .await?;
+    let links = objects
+        .iter()
+        .filter_map(|object| match object {
+            MemoryObject::MemoryLink(link) => Some(link.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let derived_ids = objects
+        .iter()
+        .filter_map(|object| match object {
+            MemoryObject::DerivedMemory(memory) => Some(memory.id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let superseded = graph_store
+        .query_superseded_derived_memory_ids(&derived_ids)
+        .await?
+        .into_iter()
+        .collect();
+    store.rebuild(
+        &retrieval_stats_edges(&objects, &links, &superseded),
+        &retrieval_stats_object_states(&objects, &superseded),
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::retrieval_stats::RetrievalStatsHealthState;
+    use crate::domain::{RelationType, RetentionState};
+    use crate::errors::{GraphQueryError, RetrievalStatsStoreError};
+    use crate::policy::retrieval_selectivity::{
+        selectivity_plan_for_entity, SelectivityStatsContext,
+    };
+    use crate::ports::graph_authority::TraceMode;
+    use crate::ports::retrieval_stats::{RetrievalStatsCounterKey, RetrievalStatsHealth};
+    use crate::test_support::{in_memory_graph_store, representative_fixtures, TestGraphStore};
+    use crate::usecases::stats_projection::StatsProjectionService;
 
     #[test]
     fn preflight_rejects_zero_provider_vector_size_before_storage_init() {
@@ -377,7 +437,9 @@ mod tests {
         )
         .unwrap();
 
-        let store = retrieval_stats_store(&settings).unwrap();
+        let store = retrieval_stats_store(&settings, &crate::test_support::in_memory_graph_store())
+            .await
+            .unwrap();
         let health = store.health().await.unwrap();
 
         assert_eq!(health.state, RetrievalStatsHealthState::Unhealthy);
@@ -385,6 +447,434 @@ mod tests {
             health.last_error_cause,
             Some(RetrievalStatsHealthCause::StoreInitialization { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn reopened_unhealthy_stats_match_fresh_graph_projection() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("stats.sqlite3");
+        let graph = in_memory_graph_store();
+        let mut fixtures = representative_fixtures();
+        fixtures.suppressed_seed.retention_state = RetentionState::Active;
+        fixtures.correction.retention_state = RetentionState::Suppressed;
+        let mut objects = fixtures.objects();
+        let mut suppressed_episode = fixtures.episode.clone();
+        suppressed_episode.id = MemoryId::from_u128(901);
+        suppressed_episode.retention_state = RetentionState::Suppressed;
+        objects.push(MemoryObject::Episode(suppressed_episode));
+        let mut links = fixtures.links();
+        for (index, object) in [
+            MemoryObject::DerivedMemory(fixtures.derived_reflection.clone()),
+            MemoryObject::DerivedMemory(fixtures.suppressed_seed.clone()),
+            MemoryObject::DerivedMemory(fixtures.correction.clone()),
+            MemoryObject::Observation(fixtures.salient_observation.clone()),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut link = fixtures.hub_links[0].clone();
+            link.id = MemoryId::from_u128(910 + index as u128);
+            link.to_id = object.id();
+            link.to_type = object.object_type();
+            link.relation = RelationType::AssociatedWith;
+            links.push(link);
+        }
+        graph
+            .upsert_objects_and_links(&objects, &links)
+            .await
+            .unwrap();
+        let fresh =
+            SqliteRetrievalStatsStore::open(directory.path().join("fresh.sqlite3")).unwrap();
+        assert!(StatsProjectionService::new(&graph, &fresh)
+            .project(&objects, &links)
+            .await
+            .causes
+            .is_empty());
+
+        let stale_entity = MemoryId::from_u128(999);
+        let mut stale_episode = fixtures.episode.clone();
+        stale_episode.id = MemoryId::from_u128(998);
+        let mut stale_link = fixtures.hub_links[0].clone();
+        stale_link.from_id = stale_entity;
+        stale_link.to_id = stale_episode.id;
+        stale_link.relation = RelationType::AssociatedWith;
+        let stale_objects = [MemoryObject::Episode(stale_episode)];
+        let stale = SqliteRetrievalStatsStore::open(&path).unwrap();
+        stale
+            .record_edges(&retrieval_stats_edges(
+                &stale_objects,
+                &[stale_link],
+                &Default::default(),
+            ))
+            .await
+            .unwrap();
+        stale
+            .record_object_states(&retrieval_stats_object_states(
+                &stale_objects,
+                &Default::default(),
+            ))
+            .await
+            .unwrap();
+        stale.mark_unhealthy(stats_failure()).await.unwrap();
+        drop(stale);
+
+        let recovered = retrieval_stats_store(&sqlite_stats_settings(&path), &graph)
+            .await
+            .unwrap();
+        assert_eq!(
+            recovered.health().await.unwrap(),
+            RetrievalStatsHealth::default()
+        );
+        assert_eq!(
+            recovered.global_episode_counter().await.unwrap(),
+            fresh.global_episode_counter().await.unwrap()
+        );
+        for relation in [
+            RelationType::Involves,
+            RelationType::AssociatedWith,
+            RelationType::About,
+        ] {
+            for object_type in [
+                ObjectType::Episode,
+                ObjectType::Observation,
+                ObjectType::DerivedMemory,
+            ] {
+                assert_eq!(
+                    recovered
+                        .global_counter(relation, object_type)
+                        .await
+                        .unwrap(),
+                    fresh.global_counter(relation, object_type).await.unwrap()
+                );
+                for entity_id in [
+                    fixtures.user_entity.id,
+                    fixtures.assistant_entity.id,
+                    fixtures.hub_entity.id,
+                    stale_entity,
+                ] {
+                    let key = RetrievalStatsCounterKey {
+                        entity_id,
+                        relation_kind: relation,
+                        object_type,
+                    };
+                    assert_eq!(
+                        recovered.counter(&key).await.unwrap(),
+                        fresh.counter(&key).await.unwrap(),
+                        "{key:?}"
+                    );
+                }
+            }
+        }
+
+        let settings = sqlite_stats_settings(&path);
+        let policy = RetrievalSelectivityPolicy::with_fanout_budgets(
+            settings.get_selectivity_smoothing_alpha(),
+            settings.get_selectivity_gamma(),
+            settings
+                .get_retrieval_fanout_budgets()
+                .map(|(relation, kind, budget)| (relation, kind, budget.min(), budget.max())),
+        );
+        let mut plans = Vec::new();
+        for store in [recovered.as_ref(), &fresh as &dyn RetrievalStatsStore] {
+            let context = SelectivityStatsContext::load(store).await.unwrap();
+            plans.push(
+                selectivity_plan_for_entity(
+                    fixtures.hub_entity.id,
+                    1.0,
+                    32,
+                    store,
+                    policy,
+                    &context,
+                    Default::default(),
+                    TraceMode::Enabled,
+                )
+                .await
+                .unwrap(),
+            );
+        }
+        assert!(plans[0]
+            .traces
+            .iter()
+            .any(|trace| trace.relation == RelationType::Involves && !trace.fallback));
+        assert_eq!(plans[0].fanout_overrides, plans[1].fanout_overrides);
+        assert_eq!(plans[0].traces, plans[1].traces);
+        drop(recovered);
+        assert_eq!(
+            SqliteRetrievalStatsStore::open(&path)
+                .unwrap()
+                .health()
+                .await
+                .unwrap(),
+            RetrievalStatsHealth::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn repeated_failed_rebuilds_keep_original_cause_and_conservative_retrieval() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("stats.sqlite3");
+        let cause = stats_failure();
+        let store = SqliteRetrievalStatsStore::open(&path).unwrap();
+        store.mark_unhealthy(cause.clone()).await.unwrap();
+        drop(store);
+
+        for graph in [
+            TestGraphStore {
+                query_error: Some(GraphQueryError::Selection {
+                    detail: "read unavailable".to_owned(),
+                }),
+                ..Default::default()
+            },
+            TestGraphStore {
+                fail_currency_query: true,
+                ..Default::default()
+            },
+        ] {
+            let settings = sqlite_stats_settings(&path);
+            let store = retrieval_stats_store(&settings, &graph).await.unwrap();
+            assert_eq!(
+                store.health().await.unwrap(),
+                RetrievalStatsHealth {
+                    state: RetrievalStatsHealthState::Unhealthy,
+                    last_error_cause: Some(cause.clone()),
+                }
+            );
+            let context = SelectivityStatsContext::load(store.as_ref()).await.unwrap();
+            let policy = RetrievalSelectivityPolicy::with_fanout_budgets(
+                settings.get_selectivity_smoothing_alpha(),
+                settings.get_selectivity_gamma(),
+                settings
+                    .get_retrieval_fanout_budgets()
+                    .map(|(relation, kind, budget)| (relation, kind, budget.min(), budget.max())),
+            );
+            let plan = selectivity_plan_for_entity(
+                MemoryId::from_u128(1),
+                1.0,
+                32,
+                store.as_ref(),
+                policy,
+                &context,
+                Default::default(),
+                TraceMode::Enabled,
+            )
+            .await
+            .unwrap();
+            assert!(!plan.traces.is_empty());
+            assert!(plan.traces.iter().all(|trace| trace.fallback));
+        }
+        assert_eq!(
+            SqliteRetrievalStatsStore::open(&path)
+                .unwrap()
+                .health()
+                .await
+                .unwrap()
+                .last_error_cause,
+            Some(cause)
+        );
+        let recovered =
+            retrieval_stats_store(&sqlite_stats_settings(&path), &in_memory_graph_store())
+                .await
+                .unwrap();
+        assert_eq!(
+            recovered.health().await.unwrap(),
+            RetrievalStatsHealth::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn healthy_stats_reopen_without_reading_the_graph() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("stats.sqlite3");
+        let store = SqliteRetrievalStatsStore::open(&path).unwrap();
+        let objects = [MemoryObject::Episode(crate::test_support::simple_episode())];
+        store
+            .record_object_states(&retrieval_stats_object_states(
+                &objects,
+                &Default::default(),
+            ))
+            .await
+            .unwrap();
+        let expected = store.global_episode_counter().await.unwrap();
+        drop(store);
+        let graph = TestGraphStore {
+            record_queries: true,
+            ..Default::default()
+        };
+        let reopened = retrieval_stats_store(&sqlite_stats_settings(&path), &graph)
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened.health().await.unwrap(),
+            RetrievalStatsHealth::default()
+        );
+        assert_eq!(reopened.global_episode_counter().await.unwrap(), expected);
+        assert!(graph.calls().is_empty());
+    }
+
+    fn sqlite_stats_settings(path: &std::path::Path) -> Settings {
+        Settings::new(
+            ::config::Config::builder()
+                .set_override("retrieval_stats_store_mode", "sqlite")
+                .unwrap()
+                .set_override("retrieval_stats_path", path.to_str().unwrap())
+                .unwrap()
+                .build()
+                .unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn stats_failure() -> RetrievalStatsHealthCause {
+        RetrievalStatsHealthCause::EdgeWrite {
+            error: RetrievalStatsStoreError::Sqlite {
+                detail: "interrupted projection".to_owned(),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn reopening_failed_statistics_restores_healthy_recall_selection() {
+        use crate::api::types::RetrievalContext;
+        use crate::domain::{Scene, SceneParticipant};
+
+        let directory = tempfile::tempdir().unwrap();
+        let graph_path = directory.path().join("graph");
+        let graph = OxigraphGraphAuthorityStore::new_persistent(&graph_path).unwrap();
+        let fixtures = representative_fixtures();
+        let participant = fixtures.user_entity.id;
+        let mut objects = vec![
+            MemoryObject::Entity(fixtures.user_entity.clone()),
+            MemoryObject::Entity(fixtures.hub_entity.clone()),
+        ];
+        let mut links = Vec::new();
+        for index in 0..48 {
+            let mut episode = fixtures.episode.clone();
+            episode.id = MemoryId::from_u128(10_000 + index);
+            episode.summary = format!("A meeting on day {index}");
+            episode.scene =
+                Scene::at(fixtures.episode.scene.time + chrono::Duration::days(index as i64));
+            episode.scene.participants.push(SceneParticipant {
+                key: Some(if index < 8 {
+                    participant
+                } else {
+                    fixtures.hub_entity.id
+                }),
+                ..Default::default()
+            });
+            let mut link = fixtures.hub_links[0].clone();
+            link.id = MemoryId::from_u128(11_000 + index);
+            link.from_id = episode.scene.participants[0].key.unwrap();
+            link.to_id = episode.id;
+            links.push(link);
+            objects.push(MemoryObject::Episode(episode));
+        }
+        graph
+            .upsert_objects_and_links(&objects, &links)
+            .await
+            .unwrap();
+        let healthy_path = directory.path().join("healthy.sqlite3");
+        let failed_path = directory.path().join("failed.sqlite3");
+        for path in [&healthy_path, &failed_path] {
+            let store = SqliteRetrievalStatsStore::open(path).unwrap();
+            assert!(StatsProjectionService::new(&graph, &store)
+                .project(&objects, &links)
+                .await
+                .causes
+                .is_empty());
+        }
+        drop(graph);
+        let settings_for = |path: &std::path::Path| {
+            Settings::new(
+                ::config::Config::builder()
+                    .set_override("graph_store_mode", "persistent")
+                    .unwrap()
+                    .set_override("oxigraph_path", graph_path.to_str().unwrap())
+                    .unwrap()
+                    .set_override("vector_store_mode", "embedded")
+                    .unwrap()
+                    .set_override(
+                        "vector_store_path",
+                        directory.path().join("vectors").to_str().unwrap(),
+                    )
+                    .unwrap()
+                    .set_override("retrieval_stats_store_mode", "sqlite")
+                    .unwrap()
+                    .set_override("retrieval_stats_path", path.to_str().unwrap())
+                    .unwrap()
+                    .build()
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        let mut scene = Scene::at(fixtures.episode.scene.time + chrono::Duration::days(300));
+        scene.participants.push(SceneParticipant {
+            key: Some(participant),
+            ..Default::default()
+        });
+        let mut context = RetrievalContext::default().with_scene(scene).with_trace();
+        context.candidate_limits.max_graph_roots = 1;
+        context.graph_limits.allowed_object_types = vec![ObjectType::Entity, ObjectType::Episode];
+        context.graph_limits.allowed_relation_types = vec![RelationType::Involves];
+        context.graph_limits.max_depth = 1;
+        let mut selections = Vec::new();
+        for (path, fail) in [(&healthy_path, false), (&failed_path, true)] {
+            let memory = CharacterMemory::new_with_embedding_provider(
+                settings_for(path),
+                "recovery-witness".to_owned(),
+                Box::new(MockEmbeddingProvider(3)),
+                MemoryId::from_u128(1),
+            )
+            .await
+            .unwrap();
+            if fail {
+                memory
+                    .memory_composition
+                    .stats_store
+                    .mark_unhealthy(stats_failure())
+                    .await
+                    .unwrap();
+            }
+            let outcome = memory.retrieve(context.clone()).await.unwrap();
+            selections.push(
+                outcome
+                    .pack
+                    .relevant_episodes
+                    .iter()
+                    .map(|episode| episode.id)
+                    .collect::<Vec<_>>(),
+            );
+            memory.close().await.unwrap();
+        }
+        assert_ne!(
+            selections[0], selections[1],
+            "the witness must expose degraded recall before recovery"
+        );
+        let reopened = CharacterMemory::new_with_embedding_provider(
+            settings_for(&failed_path),
+            "recovery-witness".to_owned(),
+            Box::new(MockEmbeddingProvider(3)),
+            MemoryId::from_u128(1),
+        )
+        .await
+        .unwrap();
+        let recovered = reopened.retrieve(context).await.unwrap();
+        let recovered_ids = recovered
+            .pack
+            .relevant_episodes
+            .iter()
+            .map(|episode| episode.id)
+            .collect::<Vec<_>>();
+        assert_eq!(recovered_ids, selections[0]);
+        assert_eq!(
+            reopened
+                .memory_composition
+                .stats_store
+                .health()
+                .await
+                .unwrap(),
+            RetrievalStatsHealth::default()
+        );
+        reopened.close().await.unwrap();
     }
 
     struct MockEmbeddingProvider(usize);
