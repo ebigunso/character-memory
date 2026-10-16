@@ -1,6 +1,6 @@
 # Plan: recall hands over a few situations by weight, says what it could not find, and every memory stays reachable by what it is
 
-- status: draft
+- status: in-progress
 - generated: 2026-10-16
 - last_updated: 2026-10-16
 - work_type: mixed
@@ -332,6 +332,31 @@ Task_2 and Task_4 both touch `src/usecases/retrieve.rs`; the file is split by fu
   - Scenarios: none
   - Summary as returned: every ask-now traces to paperwork, three pieces of the owner's or Counsel's reasoning not in the brief as ratified text; the live null spend does not count against the Plan Gate.
 - 2026-10-16: acting on the verdict. The owner's cheapness answer is now in the brief as a ratified amendment (Counsel, committed at 019be322, merged here), which meets the conditional-form lines. The two inferred clarifications (gives 3's continuation bracket; gives 5's "as of the moment it looked") are sent back to Counsel to bring to the owner for ratification by name, since items that depend on them stay ask-now until the brief carries the owner's words. The plan waits for that relay and is audited again as a revision; no line is changed meanwhile.
+
+- 2026-10-16: plan-draft value audit dispatched at `aa0514b1`, text verbatim (paths repository-relative for the committed record): "You are the value auditor. Read references/value-audit-mandate.md of the orchestration-harness skill and follow it exactly. Position: plan draft. Plan: docs/coding-agent/plans/active/v0-2-situated-recall-plan.md. Governing brief: docs/coding-agent/briefs/active/v0-2-completion-brief.md. Changes since: none."
+- 2026-10-16: verdict as returned (comparison lines in the readings file). Position: plan draft. Documents read: the plan; the brief at HEAD; the philosophy and its companion by the pointer line; common.md (pointer lines and Standing Approvals); readings after grading only; notes never opened. Product basis: philosophy. Not audited: the engineering side. Missing inputs: none (4a's three later amendments each carry the owner's quoted words with the date). Value documents changed in range: none.
+  - DoD 1 to 10 | brief | cited | 4a gives 1 to 5 as amended, means, told constraint, two-guarantees constraint, measurement constraint, records paragraph; sections 3, 4; philosophy 7.4, 7.6, 8.1, 8.5, 9 | -
+  - Planner-added 1, 2, 3, 5, 8, 9 | brief | cited | 4a gives 1, 2, 3 and its told amendment ("the means ... is the Orchestrator's"); the constraint; replaced and standing tests | Planner-added 2 observation, not a grade change: a cut anchored situation's continuation (the anchor's walk by its own links) does not reach parts the gathering brought through shared subject that nobody linked; journal it
+  - Planner-added 4 ("cheap" criterion) | brief | inferred | extends 4a gives 5's told amendment and section 1; cheap to undo | direction
+  - Planner-added 6 (live null shipped) | brief | ask-now | 4a resemblance constraint covers the intent | outward-facing with no standing approval; the only reason, so it does not count against the Plan Gate; the call waits on the authorization the Orchestrator holds. Value question: may this run spend once, bounded, on live embedding calls before the closeout reading? | -
+  - Planner-added 7, 11, 12, 13 | internal mechanics | not audited | - | -
+  - Planner-added 10 (order-rule experiment) | brief | inferred | extends 4a gives 1 and 2; philosophy 8.1 | direction
+  - Non-goals | brief / internal | cited / not audited | 4a; sections 3, 5; the records paragraph closes the list | -
+  - Design | brief | cited | 4a gives 1 ("not twelve memories in reserved slots"), 2, 3 | -
+  - Compatibility: break | brief | cited | 4a "What it replaces: ... the result contract"; user-facing, not outward-facing | -
+  - A1 | brief | cited | 4a gives 5 as ratified ("First one is a yes.") | -
+  - A2 | internal | not audited | - | -
+  - A3 | brief | cited | 4a measurement constraint | -
+  - Task_1, 2, 3, 5, 6, 7 | brief | cited | 4a records paragraph, gives 1 to 5 as amended, pass condition, two-guarantees constraint; sections 3, 4; philosophy 7.6, 8.5, 9; Task_3 carries Planner-added 4 (inferred, direction) | -
+  - Task_4 | brief | ask-now | 4a gives 1 to 5 as amended, the resemblance constraint and means cover the substance; the coverage policy rests on the provisional clause (provisional) | the live null spend only, not counted against the Plan Gate; carries Planner-added 4 and 10 as inferred | direction
+  - Decision Log 1, 3, 5, 7, 8 | brief / internal | cited / not audited | 4a; section 1; the measurement constraint; the 8th entry's "authorized" is the Plan Gate's decision, not the verdict's | -
+  - Decision Log 2 | brief | ask-now | as Planner-added 6 | -
+  - Decision Log 4 | internal | not audited | - | -
+  - Decision Log 6 (anchor-keyed walk as the anchored continuation) | brief | inferred | extends 4a gives 3 "offers to continue" and the structural-access constraint; the Counsel bracket is no support; the topic clause superseded by the told amendment; cheap to undo | -
+  - Human-only conditions pending: the owner's blind reading at closeout (4a); the owner accepts the revised roadmap sections (section 3); the owner accepts the revised catalog (section 2); the record acceptances of Task_1 and the owner's reads in Task_6 and Task_7 are reserved acts through Counsel.
+  - Scenarios: none
+  - Summary as returned: every item cited, inferred or not audited except the live-embedder spend, ask-now on the outward-facing test alone, not counting against the Plan Gate.
+- 2026-10-16: acting on the verdict. Inferred calls journaled: the cheapness criterion (direction); the order-rule experiment (direction); the anchor-keyed walk as the anchored continuation. The spend item is met by the owner's authorization held from this session ("You can do the embedding call.", 2026-10-16) and recorded in the Decision Log; the call happens once, in Task_4, as planned. The observation on the anchored continuation (parts brought through shared subject that nobody linked are not reached from the anchor's cursor) is recorded as a finding that bears on the design and sent to Counsel as a value question; the part held is the continuation of anchored situations for those parts, which no Wave 1 task touches. The Reviewer's plan review closed with no finding open (re-review APPROVED at 8e77735d, minors applied) and this audit grades every item with no ask-now that counts: the plan is AUTHORIZED under the Plan Gate's second source, by the owner's ratification of the brief. Wave 1 dispatched: Task_1 (records; a Claude worker in this worktree), Task_2 (contract; cm-worker3 in `.worktrees/recall-contract`, branch `feature/2026-10-16/recall-contract`), Task_5 (batched read; cm-worker2 in `.worktrees/recall-subject-batch`, branch `feature/2026-10-16/recall-subject-batch`), all from `aa0514b1`.
 
 ## Decision Log (append-only; re-plans and major discoveries)
 - 2026-10-16 Decision: the plan is one plan with seven tasks, contract before gathering, the walk beside the gathering, the memo and docs after.
