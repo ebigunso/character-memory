@@ -1,6 +1,6 @@
 # Plan: the situation catalog exercises the ratified philosophy, and the roadmap carries the owner's directions for v0.2's close and the phases after it
 
-- status: draft
+- status: done
 - generated: 2026-10-16
 - last_updated: 2026-10-16
 - work_type: docs
@@ -210,6 +210,38 @@
 - 2026-10-16: ADR-D-0040 revised as the owner asked (6ca6ca2f, two citation lines; Tier A re-review APPROVED), merged here; back to the owner through Counsel for acceptance by name; the closeout audit runs again once the owner answers.
 
 - 2026-10-16: ADR-D-0005 retired by the procedure (857e7cd2, cm-worker; narrow review APPROVED: ADR-D-0040 accepted with the owner's words and date, ADR-D-0005 superseded and archived, inbound references repaired, absence search clean), merged here. All three tasks done and reviewed; the owner's three human-only items met (catalog, roadmap sections, the record). Closeout audit dispatched again.
+
+- 2026-10-16: closeout value audit (second) dispatched at `f18fe7e6`, text verbatim (paths repository-relative for the committed record): "You are the value auditor. Read references/value-audit-mandate.md of the orchestration-harness skill and follow it exactly. Position: closeout. Plan: docs/coding-agent/plans/active/v0-2-catalog-roadmap-plan.md. Governing brief: docs/coding-agent/briefs/active/v0-2-completion-brief.md. Changes since: 785391cf."
+- 2026-10-16: verdict as returned (comparison lines in the readings file). Position: closeout. Documents read: the plan whole; the brief at HEAD and its diff over the range; the philosophy by the pointer line; its companion; common.md (pointer lines; Standing Approvals in effect); the run record's Scenarios; the artifact over 785391cf..f18fe7e6 one path at a time (catalog, roadmap, four drafts, ADR-D-0040 with its history, the ADR-D-0005 rename, decisions README, README, three database documents, the renderer plan, the completed residuals plan, lessons, skill-candidates, common.md, the run record, composition.rs, stats sqlite, shared.rs, tests.rs); notes never opened; readings after grading. Product basis: philosophy and the brief in the product owner's words. Not audited: the engineering side. Missing inputs: none. Value documents changed in range: the brief (preamble, informational; section 2's empty-week clause rewritten by Counsel at 0dbbee12 without a record of its own, not support, nothing relies on it; 4a with its own record, its two Counsel clarifications and two owner amendments, nothing of this unit depends on 4a); common.md (the Counsel line, not a pointer; the Standing Approvals entry); philosophy and companion unchanged.
+  - DoD: catalog carries s2, guarantees throughout | brief | cited | s2 and its means; philosophy 12 | -
+  - DoD: mapping table | brief | cited | s2 pass condition; the catalog gives every statement of 7.1 to 7.6, 8.1 to 8.3, 8.5, 10 and 12 a situation | -
+  - DoD: roadmap carries s3; familiarity open and carried | brief | inferred | extends s3 with 4a gives 4; openly unmet part; cheap to undo | -
+  - DoD: successor to ADR-D-0005, now accepted | brief | cited | s3; the acceptance line | -
+  - DoD: the owner accepts catalog and roadmap | brief | cited | s2, s3 human-only conditions; the owner's words recorded in the Decision Log | -
+  - Planner-added: identifiers; names; cross-references; the record; stop and report | brief | inferred (tightens) | extends s2 and s1 | -
+  - Non-goals; Design; Integration | brief / internal | cited / not audited | s4; 4a line 55; s1; s3; a PR opened is not a merge | -
+  - Catalog failures section | brief | cited | s2; philosophy 12, 10 | -
+  - Catalog G1 to G7, G9, G11 to G13 | brief | cited | s2; philosophy 7.3 to 7.6, 8.2 | -
+  - Catalog G8's last line | brief | inferred | extends s2 "testable from v0.3" | -
+  - Catalog G10 first departure | brief | inferred | extends philosophy 7.5, 8.3 and s2's ratified return-after-absence clause; Counsel's reworded clause not relied on | direction
+  - Catalog purpose paragraph | brief | cited | s2; philosophy 2.4 | -
+  - Catalog nine departures | brief | inferred | extends 2.4, 7.4, s2's declared departures | direction
+  - Catalog variants; rewordings; identifiers and cross-references | brief | cited / cited / inferred | s2 and its means; philosophy 8.1, 7.2, 8.5 | -
+  - Roadmap Closeout; the order; attribution pointers; v0.3 measure, gains, flinch, time in experience; v0.4 reframed, objects leaving, cites ADR-D-0040; v0.5 | brief | cited | s3 bullets, s5, s7; philosophy 7.3, 7.4, 7.5, 8.2, 8.3, 8.5 | -
+  - v0.3 C3/C5 moved; gist ruling; v0.4 volatility and the confidence view leaving; v0.4 point-in-time recall; familiarity left to the 4a plan | brief | inferred | extend s3; philosophy 8.3; cheap to undo | -
+  - ADR-D-0040 proposed, revised, accepted; ADR-D-0005 retired; README; inbound references repaired | brief | cited | s3; the acceptance line; the Standing Approvals entry as the channel | -
+  - Decision records whose wording changed after acceptance: ADR-D-0040 at 857e7cd2 (status, supersedes path, acceptance line, one More Information phrase; decision, boundary, reasons, reopen unchanged) | - | not audited | changed words named | -
+  - ADR-D-0005 (status superseded, retirement line; body unchanged) | brief | cited | the owner's acceptance "with the retirement of ADR-D-0005" | -
+  - ADR-D-0040 names ADR-D-0016's line as awaiting the owner | brief | cited | s1; 4a line 55's pattern | -
+  - common.md Counsel line and Standing Approvals entry | brief | cited | s1; the entry's record | -
+  - Spelling; G8's clause; consulted name; the two citation lines before acceptance | internal mechanics | not audited | - | -
+  - Run record created; renderer plan superseded | internal / brief | not audited / cited | 4a "the renderer as specified" | -
+  - Residuals unit items in range | brief / internal | cited / inferred / not audited | as graded at that unit's closeout | -
+  - Rulings: full supersession; removal carried now; G10 closed below the owner's level after Counsel's correction (cited on 7.5, 8.3 and s2's ratified clause, not on the rewrite; direction); identifiers, names, cross-references, "throughout", pointers, order, familiarity, gists, time in experience; the owner's acceptances by relay; ADR-D-0040 returned for the change; "the run may start further units"; the retirement under a widened owns; the handoff of decay wording; notes for Counsel (direction) | brief / internal | cited / inferred / not audited | s1, s2, s3; the Standing Approvals entry | -
+  - Human-only conditions pending: the owner's blind reading at closeout (4a, not this unit's). This unit's two (s2, s3) recorded as met by the owner's words "Mostly good. Situation catalog and roadmap looks fine." (2026-10-16, through Counsel), in the Decision Log; no proxy used. ADR-D-0040's acceptance recorded in the record.
+  - Scenarios: (1) a developer opens the revised catalog and finds, for the three failures and the thirteen situations, what is in mind and how it is held, and never a rule about what the character must say: prior not yet, now demonstrated; observe by opening docs/design/continuity_situation_catalog.md at "Failures that outweigh success" and section G and reading for any sentence that prescribes words. (2) the owner's blind reading with a control arm: prior not yet, now not yet. (3) a direction-level question reaches Counsel as a character-behaviour question instead of being decided and logged: prior not yet, now ready for the owner's judgement; the G10 question reached Counsel as the audit's value question, and Counsel answered it by correcting the brief rather than carrying it to the owner, which is the owner's to judge. Getting closer: yes; one scenario moved to demonstrated and one to ready for the owner's judgement on evidence in the range, and the closeout reading's four conditions now stand in the roadmap where v0.2 will be judged.
+  - Note outside the record: Counsel rewrote a ratified clause of brief s2 without a ratification record of its own; the grades do not rest on it, but the brief on disk differs from what the owner ratified at that clause.
+- 2026-10-16: acting on the verdict. Nothing held. Inferred calls journaled: familiarity's sequencing; identifiers, names and cross-references; G8's wording; G10's departure (direction); the nine departures (direction); the C3/C5 line; the gist ruling; volatility and the confidence view leaving; point-in-time recall. Marked direction for the owner at the run's closeout: G10's departure; the nine departures; the ruling closing G10 on Counsel's correction; the notes for Counsel. The note on the rewritten s2 clause is sent to Counsel. The unit CLOSES: status done, the plan moves to completed, the Scenarios line goes to the run record.
 
 ## Decision Log (append-only)
 - 2026-10-16 Decision: the plan review of b3d03f6b (CHANGES REQUESTED) applied, with these rulings.

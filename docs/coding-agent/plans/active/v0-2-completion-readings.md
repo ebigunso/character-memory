@@ -135,6 +135,11 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
 - The two citation lines of ADR-D-0040 revised at the owner's word | covered | the owner's words ("stripped of references to things like philosophy section numbers").
 - Human-only items | met | the owner's quoted words of 2026-10-16.
 
+- Verdict comparison for the catalog and roadmap plan, second closeout (2026-10-16), as returned:
+  - Reading compared: catalog failures, situations, purpose, variants, rewordings agree; identifiers and cross-references diverge (covered; inferred); G8 diverges (internal; inferred); G10 diverges (covered on the corrected clause and 7.5; inferred on 7.5, 8.3 and the ratified return-after-absence clause, the rewrite no support); nine departures agree (extends; inferred, direction); roadmap items agree; gist diverges (covered; inferred); familiarity diverges (covered; inferred); point-in-time and C3/C5 agree; volatility diverges (covered; inferred); ADR-D-0040 and ADR-D-0005 agree (cited); the full-supersession ruling agrees now; the citation lines diverge (covered; not audited); the handoff agrees; the resolved citation diverges (covered; inferred); human-only items diverge on support only (the plan's record not support; the owner's words settle them). Unread: the G10 ruling as an item; notes for Counsel; common.md; run record, lessons, skill-candidates; ADR-D-0040's post-acceptance wording; the residuals-unit changes.
+  - Findings compared: G10 agrees, bears on the design, inferred, the documents answer it; the nine departures agree, inferred, direction. No departure from a means.
+  - Correction inside the run: later readings cite the ratified clauses, not Counsel's rewrites; the unit closed.
+
 ## Findings
 
 - 2026-10-16, catalog and roadmap plan: G10's first departure reads "empty only for a person" where the brief's clause reads "empty only for the AI"; the brief's reason clause and philosophy 8.3 support the catalog's reading. Reading: bears on the design. Escalated to Counsel as a value question on 2026-10-16; the G10 departure text is held as written until the answer.
