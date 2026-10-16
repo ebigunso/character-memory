@@ -126,6 +126,15 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
   - Findings compared: none found.
   - Correction inside the run: the two parts read as covered are read as extending in later readings.
 
+### v0-2-catalog-roadmap-plan, closeout (second, after the owner's acceptances)
+
+- All items of the first closeout reading | covered | as read there; the owner's acceptances now on disk in the Decision Log ("Mostly good. Situation catalog and roadmap looks fine."; "I accept ADR-D-0040 by name, with the retirement of ADR-D-0005.").
+- G10's departure | covered | the brief's corrected clause (Counsel, 2026-10-16) and philosophy 7.5.
+- The nine departures in the purpose paragraph | extends | philosophy 2.4 and 7.4; the brief's declared departures; journaled as direction.
+- ADR-D-0040 accepted and ADR-D-0005 retired by the procedure | covered | the owner's words; the repository's retirement procedure.
+- The two citation lines of ADR-D-0040 revised at the owner's word | covered | the owner's words ("stripped of references to things like philosophy section numbers").
+- Human-only items | met | the owner's quoted words of 2026-10-16.
+
 ## Findings
 
 - 2026-10-16, catalog and roadmap plan: G10's first departure reads "empty only for a person" where the brief's clause reads "empty only for the AI"; the brief's reason clause and philosophy 8.3 support the catalog's reading. Reading: bears on the design. Escalated to Counsel as a value question on 2026-10-16; the G10 departure text is held as written until the answer.

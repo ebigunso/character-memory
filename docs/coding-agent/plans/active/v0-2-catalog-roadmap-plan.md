@@ -209,6 +209,8 @@
 
 - 2026-10-16: ADR-D-0040 revised as the owner asked (6ca6ca2f, two citation lines; Tier A re-review APPROVED), merged here; back to the owner through Counsel for acceptance by name; the closeout audit runs again once the owner answers.
 
+- 2026-10-16: ADR-D-0005 retired by the procedure (857e7cd2, cm-worker; narrow review APPROVED: ADR-D-0040 accepted with the owner's words and date, ADR-D-0005 superseded and archived, inbound references repaired, absence search clean), merged here. All three tasks done and reviewed; the owner's three human-only items met (catalog, roadmap sections, the record). Closeout audit dispatched again.
+
 ## Decision Log (append-only)
 - 2026-10-16 Decision: the plan review of b3d03f6b (CHANGES REQUESTED) applied, with these rulings.
   - ADR-D-0005: the roadmap carries the owner's ratified removal, and Task_3 proposes the record that makes it the outcome of ADR-D-0005's revisit, for the owner to accept. Holding the v0.4 portion instead was rejected: the brief states the removal outright, and the record is the owner's act either way.
