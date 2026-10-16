@@ -226,6 +226,13 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
   - Findings compared: finding 1 (continuation) agrees that it bears on the design, closed for topic by the told amendment, anchored continuation extends the ratified text; finding 2 (snapshot) agrees, closed; finding 3 (conditional absence) agrees, closed. Not recorded: a cut anchored situation's continuation does not reach parts brought through shared subject that nobody linked; bears on the design; grade unchanged.
   - Correction inside the run: the unrecorded departure is a finding below, escalated; the spend is read as needing the owner's authorization, which the Orchestrator holds.
 
+### v0-2-situated-recall-plan, plan draft, revision after authorization (continuation of a cut matter)
+
+- Planner-added: a cut matter's continuation covers the linked part by the walk and the shared-subject part by the set-aside continuation | covered | 4a gives 3 as ratified and as Counsel corrected it on 2026-10-16 (continuing a cut matter continues the same gathering).
+- Task_4's cut reporting with both continuations | covered | 4a gives 3.
+- Decision Log: the finding answered from the ratified text; hold released; revision audited before Wave 2 | covered | brief section 1 governance; 4a gives 3.
+- Every other item | as the previous reading (unchanged).
+
 ## Findings
 
 - 2026-10-16, situated recall plan: the walk's cursor, used as a cut situation's continuation, has no key for a situation anchored on an unsettled matter or a topic, so for those anchors "offers to continue" reaches nothing. Reading: bears on the design (the character experiences an empty offer). Escalated to Counsel as a value question on 2026-10-16; the continuation for matter- and topic-anchored situations is held until the owner answers.
