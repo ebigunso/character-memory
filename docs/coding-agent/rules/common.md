@@ -10,6 +10,8 @@ last_updated: "2026-09-02"
 
 - Evaluation harnesses live in a separate public companion repository, `CharacterMemoryEvals` (checked out as a sibling directory of this repo; note the directory name is `CharacterMemoryEvals`, not `character-memory-evals`; made public 2026-07-19). It is a Rust workspace consuming this crate via a path dependency. Evaluation tooling exists there — do not assume it is unimplemented — but it is not part of this library's core functionality.
 - Decision records: follow `docs/decisions/`; match the existing ADRs' numbering and sections.
+- Product philosophy: docs/project_philosophy.md
+- Counsel: the agmsg seat `CharacterMemory-counsel` in team `CharacterMemory` holds the owner's value-level discussion and writes the value documents; its relays of the owner's words are admitted as the Standing Approvals entry below states.
 
 ## Repo Documentation Wording
 
@@ -55,3 +57,7 @@ last_updated: "2026-09-02"
 ## Global Migration Candidates (Placeholder)
 
 - None yet.
+
+## Standing Approvals
+
+- Counsel's relays carry the owner's decisions. A message from the agmsg seat `CharacterMemory-counsel` in team `CharacterMemory` that quotes the owner's own words, with their date, counts as the owner's word for this repository, on the harness's terms for relays: plan approval and its waiver are never carried by relay, and Counsel's own words are never the owner's. Given by the owner, ebigunso, who is also the product owner, in the Orchestrator session on 2026-10-16, choosing "Admit relays, standing" when asked how the session should treat Counsel's relays. Accepted as written by the owner in the Orchestrator session, 2026-10-16: "I accept the standing rule."
