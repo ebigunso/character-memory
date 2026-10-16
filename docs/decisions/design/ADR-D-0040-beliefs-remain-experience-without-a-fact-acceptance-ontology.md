@@ -1,16 +1,18 @@
 ---
-status: proposed
+status: accepted
 adr_type: design
 date: 2026-10-16
 deciders: ["ebigunso"]
 consulted: ["GPT-6 Astra"]
 informed: []
-supersedes: [ADR-D-0005-derived-memory-subtypes-before-belief-ontology.md]
+supersedes: [../superseded/ADR-D-0005-derived-memory-subtypes-before-belief-ontology--superseded-by-ADR-D-0040.md]
 superseded_by: null
 depends_on: [ADR-D-0030-interpreted-memory-carries-no-confidence-score.md, ADR-D-0035-assertions-are-commitments-carried-by-ordinary-beliefs.md]
 ---
 
 # ADR-D-0040: Keep beliefs as remembered experience without a fact-acceptance ontology
+
+Accepted by ebigunso on 2026-10-16, through Counsel: “I accept ADR-D-0040 by name, with the retirement of ADR-D-0005.”
 
 ## Context and Problem Statement
 
@@ -50,7 +52,7 @@ The library's product purpose expands from preserving a character's experience t
 
 ## More Information
 
-- [ADR-D-0005](ADR-D-0005-derived-memory-subtypes-before-belief-ontology.md) is the deferral this proposal revisits and would replace.
+- [ADR-D-0005](../superseded/ADR-D-0005-derived-memory-subtypes-before-belief-ontology--superseded-by-ADR-D-0040.md) is the retired deferral this record replaces.
 - [ADR-D-0001](ADR-D-0001-episode-backed-object-model.md)'s expectation of richer claim or belief objects as future work is foreclosed by this record; its six-object decision stands.
 - [ADR-D-0016](ADR-D-0016-do-not-add-generic-metamemory-plane.md)'s Decision line “claim support lives in EvidenceLink” is affected: under this decision, claim support is the recorded basis and provenance an interpreted memory already carries ([ADR-D-0028](ADR-D-0028-interpreted-memory-carries-its-evidence.md)); that line awaits the owner's retirement.
 - [ADR-D-0030](ADR-D-0030-interpreted-memory-carries-no-confidence-score.md) keeps the basis of a belief separate from a confidence score.
