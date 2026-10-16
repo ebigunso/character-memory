@@ -196,6 +196,31 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
   - Findings compared: the continuation finding agrees that it bears on the design, its closure resting on an inferred statement so the item stays ask-now; DoD 4's omitted disposition agrees, cited; the snapshot wording and the conditional form bear on the design and not recorded, ask-now.
   - Correction inside the run: the two departures are recorded as findings below and sent to Counsel for the owner's ratification by name; the cheapness answer now sits in the brief.
 
+### v0-2-situated-recall-plan, plan draft, revision with the owner's two ratifications
+
+- Goal | covered | brief 4a.
+- DoD: situations, paths, ingredients, cut with continuation (walk cursor for anchored situations; set-aside search for topic gatherings) | covered | 4a gives 1, 2, 3 with its told amendment of 2026-10-16.
+- DoD: open order rule; similarity a condition; coverage reported | covered | 4a gives 2; the resemblance constraint.
+- DoD: three absence states; verified absence as of the moment it looked; the cheap branch in the turn, else the compromise returns | covered | 4a gives 5 as ratified (the owner's "First one is a yes."; the cheapness amendment).
+- DoD: familiarity and history when touched | covered | 4a gives 4 and 3.
+- DoD: the walk | covered | 4a structural-access constraint.
+- DoD: one hop and the rest | covered | 4a means and told constraint.
+- DoD: records; measurement; subject-state speed; memo and example | covered | 4a records paragraph; measurement constraint; section 4; section 3 means; philosophy 9.
+- Planner-added: one bound; fanout as cut; keyset cursor; standing tests; direction and due kept; witness sizes; artifact; example determinism; batched read | covered | 4a; internal mechanics.
+- Planner-added: continuation as walk cursor or set-aside list with a narrowing cue, explicit exclusions as the means | covered | 4a gives 3's told amendment ("search again with explicit exclusions"; the means the Orchestrator's).
+- Planner-added: "cheap" criterion | extends | the owner's amendment names the criterion, not the number.
+- Planner-added: live-embedder null shipped | covered | 4a resemblance constraint; the owner's authorization (Decision Log; the spend does not count against the Plan Gate).
+- Planner-added: order-rule experiment | extends | 4a gives 1 and 2; philosophy 8.1.
+- Non-goals | covered | 4a; sections 2, 3, 5.
+- A1 (as of the moment it looked) | covered | 4a gives 5 as ratified.
+- A2, A3 | covered | internal mechanics; 4a measurement constraint.
+- Task_1 | covered | 4a records paragraph.
+- Task_2 (contract, set-aside fields) | covered | 4a gives 1, 2, 3 amended, 5.
+- Task_3 (walk; exhaustive check and its cost) | covered | 4a structural-access constraint; gives 5 amended.
+- Task_4 (gathering, continued topic search, order, absence, familiarity, null) | covered | 4a gives 1 to 5 as amended; provisional coverage policy built as written; the order rule extends.
+- Task_5, 6, 7 | covered | section 4; section 3 means; philosophy 9; 4a "What it replaces".
+- Decision Log entries, the owner's answers included | covered | 4a as ratified and amended; the owner's quoted words of 2026-10-16.
+
 ## Findings
 
 - 2026-10-16, situated recall plan: the walk's cursor, used as a cut situation's continuation, has no key for a situation anchored on an unsettled matter or a topic, so for those anchors "offers to continue" reaches nothing. Reading: bears on the design (the character experiences an empty offer). Escalated to Counsel as a value question on 2026-10-16; the continuation for matter- and topic-anchored situations is held until the owner answers.
@@ -203,3 +228,4 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
 
 - 2026-10-16, situated recall plan: 4a's verified-absence statement now reads "as of the moment it looked, which it says" where the ratified words were "at a stated snapshot" (Counsel's inferred clarification). Reading: bears on the design (what the character can say about its flat no). Sent to Counsel for the owner's ratification by name on 2026-10-16; the plan waits.
 - 2026-10-16, situated recall plan: verified absence in the turn conditional on the exhaustive check's cost (the owner's answer). Reading: bears on the design (whether a large store leaves the turn at nothing found). The owner's words now sit in 4a as a ratified amendment (019be322); the next audit grades them there.
+  - 2026-10-16: both clarifications returned as the owner's words (the snapshot wording ratified; continuation amended as a told statement); the findings are closed by the brief's ratified text.
