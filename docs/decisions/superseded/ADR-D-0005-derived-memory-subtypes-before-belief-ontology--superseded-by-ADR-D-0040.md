@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded
 adr_type: design
 date: 2026-04-26
 deciders: ["ebigunso"]
@@ -14,11 +14,13 @@ warrant:
 depends_on: []
 implements: []
 supersedes: []
-superseded_by: null
+superseded_by: ../design/ADR-D-0040-beliefs-remain-experience-without-a-fact-acceptance-ontology.md
 supersession_scope: null
 ---
 
 # ADR-D-0005: Use DerivedMemory subtypes in v0.1 before a normalized belief ontology
+
+Retired on 2026-10-16. Replaced by [ADR-D-0040](../design/ADR-D-0040-beliefs-remain-experience-without-a-fact-acceptance-ontology.md).
 
 ## Context and Problem Statement
 

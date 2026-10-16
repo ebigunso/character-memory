@@ -1354,7 +1354,7 @@ scope keys on derived memories are derived from each memory's scene at write tim
 
 ```text
 reflection that generates text: the generation phase (section 14); v0.2 may emit a "this scope has accumulated enough to reflect on" signal and nothing more
-first-class OpenLoop, Commitment, CharacterSignal, RelationshipState object types: the subtypes stay (ADR-D-0005)
+first-class OpenLoop, Commitment, CharacterSignal, RelationshipState object types: the subtypes stay (ADR-D-0040)
 a current-state view type: a scene with no topic is the same retrieval with the content route empty
 a scope hint by ID, a goal or purpose field, or any retrieval mode enumeration
 involuntary recall from weak cues (D12): the long-horizon phase
@@ -1481,7 +1481,7 @@ Attribution's core, whether the character witnessed a thing or was told it, is v
 ## Not in v0.4, and no longer on the roadmap
 
 ```text
-the first-class fact-acceptance objects, Assertion, Claim, EvidenceLink, BeliefAssessment, SourceAssessment, with stance and confidence, and the belief ontology and contradiction machinery around them: removed from the roadmap rather than kept conditional, because the question they answer, whether a claim is true, is not this library's; memory is subjective and says only what the character's experience has built toward believing (philosophy 8.2); ADR-D-0005 deferred them, and the outcome of its revisit is proposed as ADR-D-0040
+the first-class fact-acceptance objects, Assertion, Claim, EvidenceLink, BeliefAssessment, SourceAssessment, with stance and confidence, and the belief ontology and contradiction machinery around them: removed from the roadmap rather than kept conditional, because the question they answer, whether a claim is true, is not this library's; memory is subjective and says only what the character's experience has built toward believing (philosophy 8.2); ADR-D-0005 deferred them, and the outcome of its revisit is accepted as ADR-D-0040
 ```
 
 The assertions of ADR-D-0035, the mechanical commitments an ordinary belief carries, are not these objects and stay.
