@@ -26,7 +26,7 @@ ADR-D-0035's assertions stay: a mechanical assertion is the character's commitme
 
 ## Why
 
-This serves the product philosophy's section 8.2, “A belief is built from experience, and the record says which”: the character can remember what it witnessed, was told, said or thought without the library deciding which account is true. A fact-acceptance ontology answers that different question and would turn the character's subjective memory into a truth-maintenance system.
+This serves the product philosophy's statement, “A belief is built from experience, and the record says which”: the character can remember what it witnessed, was told, said or thought without the library deciding which account is true. A fact-acceptance ontology answers that different question and would turn the character's subjective memory into a truth-maintenance system.
 
 ## Rejected Alternatives
 
@@ -55,4 +55,4 @@ The library's product purpose expands from preserving a character's experience t
 - [ADR-D-0016](ADR-D-0016-do-not-add-generic-metamemory-plane.md)'s Decision line “claim support lives in EvidenceLink” is affected: under this decision, claim support is the recorded basis and provenance an interpreted memory already carries ([ADR-D-0028](ADR-D-0028-interpreted-memory-carries-its-evidence.md)); that line awaits the owner's retirement.
 - [ADR-D-0030](ADR-D-0030-interpreted-memory-carries-no-confidence-score.md) keeps the basis of a belief separate from a confidence score.
 - [ADR-D-0035](ADR-D-0035-assertions-are-commitments-carried-by-ordinary-beliefs.md) defines the assertions retained by this decision.
-- [Product philosophy, section 8.2](../../project_philosophy.md#82-memory-held-as-experience) states the subjective memory boundary; [the v0.2 completion brief, section 3](../../coding-agent/briefs/active/v0-2-completion-brief.md#3-the-roadmap) directs the roadmap's change.
+- [Product philosophy](../../project_philosophy.md) states the subjective memory boundary; [the v0.2 completion brief](../../coding-agent/briefs/active/v0-2-completion-brief.md) directs the roadmap's change.
