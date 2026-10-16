@@ -238,6 +238,16 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
   - Findings compared: findings 1 to 3 agree, closed; finding 4 (shared-subject parts unreached from the anchor's cursor) agrees that it bears on the design, closed by this revision. The observation on the continued search's connection is a wording gap, graded cited.
   - Correction inside the run: the wording applied; later readings cite the ratified sentence, not Counsel's bracket.
 
+### v0-2-situated-recall-plan, plan draft, revision for the cut-is-the-character's statement
+
+- DoD 1's cut as the character's own sense of more, with pressure, a continuation it can invoke, unfinished listed within the turn | covered | 4a new gives-statement after gives 3 ("A cut situation is the character's to finish, unprompted") and its means.
+- Planner-added: the memo prints each cut with pressure and the way to continue; the request accepts it back | covered | 4a's means ("the way to continue is in what the character reads").
+- Task_2's cut marker fields and unfinished list | covered | the same statement.
+- Task_4's cut handed as the character's own sense; continuation on its call | covered | the same statement; gives 3.
+- Task_6's memo lines | covered | the same statement; philosophy 9.
+- Decision Log entry | covered | the brief's amendment; section 1.
+- Every other item | as the previous readings (unchanged).
+
 ## Findings
 
 - 2026-10-16, situated recall plan: the walk's cursor, used as a cut situation's continuation, has no key for a situation anchored on an unsettled matter or a topic, so for those anchors "offers to continue" reaches nothing. Reading: bears on the design (the character experiences an empty offer). Escalated to Counsel as a value question on 2026-10-16; the continuation for matter- and topic-anchored situations is held until the owner answers.
