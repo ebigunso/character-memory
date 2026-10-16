@@ -161,6 +161,36 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
   - Findings compared: none found.
   - Correction inside the run: the two parts read as covered are read as extending in later readings.
 
+### v0-2-situated-recall-plan, plan draft, revision with the owner's answer on verified absence
+
+- Goal | covered | brief 4a.
+- DoD: situations, paths, ingredients, cut with continuation; no room, no sections | covered | 4a gives 1, 2, 3.
+- DoD: open order rule; similarity a condition; coverage reported | covered | 4a gives 2; the resemblance constraint.
+- DoD: three absence states, verified absence in the turn if the exhaustive check is cheap, else the compromise returns to the owner | covered | the owner's answer of 2026-10-16 recorded in the Decision Log; 4a gives 5 and the bounded-recall constraint; the snapshot clause as clarified.
+- DoD: familiarity and history when touched | covered | 4a gives 4 and 3.
+- DoD: the walk | covered | 4a structural-access constraint.
+- DoD: one hop and the rest | covered | 4a means and told constraint.
+- DoD: records | covered | 4a records paragraph.
+- DoD: measurement | covered | 4a measurement constraint.
+- DoD: subject-state speed | covered | section 4.
+- DoD: memo and example | covered | section 3 means; philosophy 9.
+- Planner-added: one bound; paths and cut; fanout as cut; keyset cursor | covered | 4a gives 1, 3; the constraint.
+- Planner-added: "cheap" as no slower than a turn's recall at the three-year store, linear growth | extends | the owner's answer names the criterion, not the number.
+- Planner-added: live-embedder null shipped | covered | 4a resemblance constraint; the owner's authorization in the Decision Log.
+- Planner-added: batched read and witness; standing tests restated; direction and due kept; walk witness sizes; null artifact; example determinism | covered | 4a; internal mechanics.
+- Planner-added: order-rule experiment | extends | 4a gives 1 and 2; philosophy 8.1.
+- Non-goals | covered | 4a; sections 3, 4, 5; decay wording left as history.
+- A1 (snapshot as of the moment it looked) | covered | 4a as clarified.
+- A2, A3 | covered | internal mechanics; 4a measurement constraint.
+- Task_1 | covered | 4a records paragraph.
+- Task_2 | covered | 4a gives 1, 2, 3, 5.
+- Task_3 (the walk; the exhaustive check and its cost measurement) | covered | 4a structural-access constraint; the owner's answer.
+- Task_4 | covered | 4a gives 1 to 5; the owner's answer for the absence form; the provisional coverage policy built as written; the order rule extends.
+- Task_5 | covered | section 4.
+- Task_6 | covered | philosophy 9; section 3 means.
+- Task_7 | covered | section 3; 4a "What it replaces".
+- Decision Log entries, the owner's answers included | covered | 4a; the owner's quoted words of 2026-10-16.
+
 ## Findings
 
 - 2026-10-16, situated recall plan: the walk's cursor, used as a cut situation's continuation, has no key for a situation anchored on an unsettled matter or a topic, so for those anchors "offers to continue" reaches nothing. Reading: bears on the design (the character experiences an empty offer). Escalated to Counsel as a value question on 2026-10-16; the continuation for matter- and topic-anchored situations is held until the owner answers.
