@@ -27,7 +27,7 @@ Caveat: the benchmark gap-bucket baselines rest on small per-bucket samples and 
 
 # 1. The scene
 
-The scene is the circumstances a memory was formed in and the circumstances recall happens in. On a memory it is who was present, who said it, whether the character was there when it happened, and in which setting. Episodes already carry participants and a source conversation, and this phase reports that part of the scene on every admitted memory; who said what on reflection's outputs arrives with consolidation in v0.3 (ADR-D-0028), and whether the character was there, with the rest of attribution, arrives in v0.4. At retrieval it is:
+The scene is the circumstances a memory was formed in and the circumstances recall happens in. On a memory it is who was present, who said it, whether the character was there when it happened, and in which setting. Episodes already carry participants and a source conversation, and this phase reports that part of the scene on every admitted memory; who said what on reflection's outputs arrives with consolidation in v0.3 (ADR-D-0028), and so does whether the character was there, attribution's core; who else knows arrives in v0.4. At retrieval it is:
 
 ```text
 when      the reference time; the only required field, defaulting to now
@@ -73,7 +73,7 @@ An item is current when it is the latest in its supersession chain, not resolved
 
 ## 2.2 Prospective memory
 
-Open loops and commitments keep their subtypes (ADR-D-0005) and gain what the trigger route and the renderer need: a direction, an actor and a counterpart, so the character can owe and be owed (ADR-D-0020), and an optional due date. An event-triggered intention surfaces when its counterpart appears or its topic arises (catalog D7); a time-triggered one surfaces on its due date and keeps surfacing while overdue, until it is resolved (D8). Resolution goes through the existing link and correct paths; a facade method for it enters only if the scenarios show callers get the recipe wrong.
+Open loops and commitments keep their subtypes (ADR-D-0040) and gain what the trigger route and the renderer need: a direction, an actor and a counterpart, so the character can owe and be owed (ADR-D-0020), and an optional due date. An event-triggered intention surfaces when its counterpart appears or its topic arises (catalog D7); a time-triggered one surfaces on its due date and keeps surfacing while overdue, until it is resolved (D8). Resolution goes through the existing link and correct paths; a facade method for it enters only if the scenarios show callers get the recipe wrong.
 
 ## 2.3 Treatment by supersession
 
@@ -173,7 +173,7 @@ interpreting-neighbor co-retrieval
 involuntary recall from weak cues, D12 (v0.5)
 the short-term store and the mechanical write (v0.3, beside reflection)
 reinforce, decay, archival
-attribution fields beyond what the scene implies (v0.4)
+attribution fields beyond what the scene implies (the core, witnessed or told, in v0.3; who else knows in v0.4)
 ```
 
 ---
@@ -198,3 +198,20 @@ Implementation records expected with the plan, each written when its contract is
 # 9. Library boundary
 
 Continuity structures are memory state, not agent orchestration. The library takes the scene and reports it, never decides disclosure and never withholds by it; purpose comes from memory; the model reconstructs the response. If scope modeling grows past derived keys, the value audit names the consumer before any object is added.
+
+---
+
+# 10. Closeout
+
+Before the phase is judged complete, the owner reads a small set of transcripts of a character carried through catalog situations with a model in the loop. Four conditions bind, each one:
+
+```text
+the material    the character's memory comes from material not written for the probes: the LoCoMo and LongMemEval conversations, ingested through the ordinary write path with no per-probe editing
+the probes      chosen after recall and the renderer are frozen, by a Reviewer who did not build them
+the control     the same probes run against the same model with no memory, and against plain top-k over the same store
+the reading     the owner reads blind to which arm produced each transcript
+```
+
+Negative probes, the catalog's something never lived, are included. The phase's limit is stated in advance: the character has history but no self of its own, so the reading judges what recall hands over and how it is labelled; behaviour shaped by reflection is v0.3's measure, the same situation with two characters. If any of the four conditions cannot be met, the reading is not run and the phase closes on the retrieval tier with that limitation written into its closeout. The evaluation harness's behavioral tier stays scheduled with v0.3 (section 4); the reading is a closeout judgement, not an instrument.
+
+The order of the remaining work: the pack renderer and the example loop (section 2.4) first, since the reading needs them; then the reading; then the evals re-baseline of the ADR-I-0022 baselines and the paid benchmark runs, which measure a design that has been seen to behave. No paid benchmark run precedes the reading.

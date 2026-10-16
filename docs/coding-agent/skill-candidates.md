@@ -125,3 +125,10 @@ Status note (2026-07-23): all entries below were triaged and dispositioned by th
 - Candidate guidance (long-term owners: orchestration-harness lifecycle gates + engineering-quality-baselines review routing): institutionalize a design-value audit (Tier A altitude, verdicts EARNS-ITS-PLACE/OVERSIZED/DELETE, judged against roadmap deliverables and project philosophy, willing to find against the work) at four scheduled points — (1) design review: every proposed structure names a concrete current or named-next-phase consumer; (2) fix-chain depth: a third bounce on one seam forces the proportionality question into the decision log before round four; (3) pre-merge after fix churn, paired with the detail-coherence audit; (4) next-phase planning: no-inheritor structures become deletion candidates and doc-parked deferrals are re-confirmed. Explicit non-trigger: never continuously — ritualized asking destroys the honesty that makes the question work.
 - Generalizes: any codebase with review gates; the trigger points are process-shaped, not language- or domain-shaped.
 - Provenance: structured-verdict-observability phase, 2026-07-22 Tier A value audit (APPROVED, two OVERSIZED, precedent-drift warning); the four-round identity fix chain as the depth-trigger case study.
+
+## 2026-10-16 — `validate_plan.py` drops the first wave line under a bare `## Task Waves` heading
+
+- Symptom: a plan whose heading is exactly `## Task Waves` with waves `[Task_1, Task_2]` and `[Task_3]` fails with "Task Waves must include all tasks exactly once"; the same plan passes with `## Task Waves (explicit parallel dispatch sets)`.
+- Root cause: `section_body` matches the heading with `^##\s+<heading>(?:\s|\(|$).*?$` under MULTILINE; with nothing after the heading, `\s` consumes the newline and `.*?$` swallows the first body line.
+- Candidate fix (owner: plan-format validator): match the heading as `^##\s+<heading>(?:[ \t(].*)?$`, and add a test with a bare heading.
+- Provenance: CharacterMemory residuals plan, 2026-10-16.

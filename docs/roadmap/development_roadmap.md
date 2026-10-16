@@ -324,8 +324,8 @@ No interpreted memory carries a confidence score or a numeric measure of emotion
 | v0.1.6 | Embedded vector candidate recall | Finished 2026-09-04. An embedded vector candidate store on the in-process build of the service backend (Qdrant Edge) is the default vector mode at its exact-scan indexing threshold, so zero-infrastructure local deployments and the default test path need no external service; the service adapter remains the explicit service mode. The redesigned port reports recall completeness, accepts only object-type scope, and stores the five-field record shared by both adapters. Companion-repository evaluation work is tracked there. Decisions: ADR-I-0023 through ADR-I-0028. |
 | v0.2 | Situated recall and scoped continuity | The scene on every memory and as the retrieval input, situated activation with a candidate route and an admission floor per cue kind, prospective memory (direction and due date on commitments and open loops, surfacing on their trigger), the currency invariant with staleness reported, treatment by supersession with write-path warnings, the scene reported and never a gate on recall, selectivity widening or its declination, a pack renderer, and an example loop. |
 | v0.3 | Trace, consolidation, and reflection | A short-term store beside core memory written mechanically with no language-model call, recall across both stores including by topic, changes of state discovered at recall, reflection as the library's one producer of interpreted memory, with evidence rules enforced at the write path for reflection and deliberate callers alike, presence accounting, a project-owned default prompt run through a consumer-supplied model, and the behavioral evaluation tier. |
-| v0.4 | Temporal validity, attribution, and entity evolution | Validity intervals and volatility, attribution completing the scene, entity aliases and roles over time, current-belief filtering as currency, and source reliability as scoped derived memories. The belief ontology stays behind ADR-D-0005's revisit clause. |
-| v0.5 | Long-horizon shape | Currency at scale, consolidation of periphery into gist with provenance, query-time associative activation with no persisted structure, evidence-derived familiarity. Durable associative units enter only on measured demand. |
+| v0.4 | What the character holds about the world over time | Validity intervals on what it believes, aliases and roles over time, who else knows, and source reliability as the character's own belief about a source; time counted in experience opens the phase if v0.3's planning found it not cheap over the trace store. The first-class fact-acceptance objects have left the roadmap. |
+| v0.5 | The long horizon proper | A decade of gists (the long-horizon consolidation of periphery into gist, with provenance), recognition of a returning stranger, query-time associative activation with no persisted structure, evidence-derived familiarity; durable associative units enter only on measured demand. |
 | Dissolved | Retrieval observability and governance | Delivered in the v0.1 family or moved to the phases and the evaluation repository that need its pieces (section 17). |
 | v1.0 | Text-only release-ready state | Defined in section 1: the continuity situation catalog's situations met for text input at both evaluation tiers. Reached by the numbered phases above it. |
 | Beyond text | Multimodal and embodied expansion (unnumbered horizon) | Voice beyond transcript, multimodal observations, situation frames, object/place/action memory, and embodied context through symbolic memory objects and opaque external source references. Raw media and sensor logs are not stored by Character Memory core. An aspiration past v1.0, never a v1.0 gate. |
@@ -1354,12 +1354,12 @@ scope keys on derived memories are derived from each memory's scene at write tim
 
 ```text
 reflection that generates text: the generation phase (section 14); v0.2 may emit a "this scope has accumulated enough to reflect on" signal and nothing more
-first-class OpenLoop, Commitment, CharacterSignal, RelationshipState object types: the subtypes stay (ADR-D-0005)
+first-class OpenLoop, Commitment, CharacterSignal, RelationshipState object types: the subtypes stay (ADR-D-0040)
 a current-state view type: a scene with no topic is the same retrieval with the content route empty
 a scope hint by ID, a goal or purpose field, or any retrieval mode enumeration
 involuntary recall from weak cues (D12): the long-horizon phase
 the short-term store and the mechanical write: v0.3, beside reflection, since trace is released only by consolidation and would otherwise only accumulate
-attribution fields beyond what the scene already implies (v0.4)
+attribution fields beyond what the scene already implies (its core, witnessed or told, in v0.3; who else knows in v0.4)
 ```
 
 ## Acceptance criteria
@@ -1376,6 +1376,12 @@ Selectivity beyond entity roots is either applied with its new signal or decline
 The pack renderer and the example loop exist, and the README describes what ships.
 ```
 
+## Closeout
+
+The phase closes with a reading of behaviour, the owner's judgement of a small set of transcripts of a character carried through catalog situations with a model in the loop. Four conditions bind, each one: the character's memory comes from material not written for the probes (the LoCoMo and LongMemEval conversations, ingested through the ordinary write path with no per-probe editing); the probes are chosen after recall and the renderer are frozen, by a Reviewer who did not build them; a control arm runs the same probes against the same model with no memory and against plain top-k over the same store; the owner reads blind to which arm produced each transcript. Negative probes, the catalog's something never lived, are included. The phase's limit is stated in advance: the character has history but no self of its own, so the reading judges what recall hands over and how it is labelled, not behaviour shaped by reflection, which is v0.3's measure. If any of the four conditions cannot be met, the reading is not run and the phase closes on the retrieval tier with that limitation written into its closeout. The evaluation harness's behavioral tier stays scheduled with v0.3; the reading is a closeout judgement, not an instrument.
+
+The order of the remaining work: the pack renderer and the example loop first, since the reading needs them; then the reading; then the evals re-baseline of the ADR-I-0022 baselines and the paid benchmark runs, which measure a design that has been seen to behave. No paid benchmark run precedes the reading.
+
 ---
 
 # 14. v0.3: trace, consolidation, and reflection
@@ -1385,6 +1391,8 @@ Detailed draft: [`v0_3_memory_generation_and_reflection.md`](roadmap-phases/v0_3
 ## Intent
 
 Make the library able to form memory from experience under two constraints: a routine write costs no language-model call, and nothing enters lasting memory without stated evidence the write path can check; whether a judgment is right is measured, not guaranteed. Experience leaves a literal trace at once; the character reaches it immediately; reflection decides afterward what lasts. The behavioral standard is the catalog's sections E and F.
+
+What reflection is for: it shapes and persists the character's own thoughts and tendencies, which further reinforce how it behaves later. A character with such a memory behaves in ways its lived experience shaped, where a fresh session given the transcript behaves generically with the same facts. The phase is measured by that difference: the catalog's the same situation, two characters, read against the strongest control, the same model with the whole transcript in context; what is sought is behaviour shaped by lived experience against generic behaviour with the same facts.
 
 This phase moved up from its earlier position as v0.6 because the write-plan validation path exists (v0.1.3) and the evaluation harness can judge whether formed memory helps or pollutes (v0.1.4 onward). Its shape was settled on 2026-09-20 with the acceptance of the decision records it cites, and replaces the earlier idea of generation on every remember call.
 
@@ -1398,6 +1406,7 @@ state before reflection   discovered at recall: a surfaced durable item cues the
 entities as notions   an entity records that the character has someone or something in mind; its name, kind, standing, and sameness with another are beliefs with evidence, current by supersession; nothing is merged, split, or deleted (ADR-D-0034)
 reflection            reads before it writes; a scope's pass and the day's pass; outputs are the existing memory kinds through prepare, validate, commit; trace is released only after commit
 evidence rules        grounding by locator, register, own versus perceived, attribution copied or judged with its basis, the bar following attribution, computed promotion thresholds, contradictions held, trace untrusted (ADR-D-0028)
+attribution's core    whether the character witnessed what a memory records or was told it, held on the memory with its basis; the character's own sayings are their own kind of evidence, kept apart from what it witnessed and what it was told, so a belief resting on one sighting and four retellings is held as exactly that (philosophy 8.2)
 memory as experience    no confidence score and no numeric emotion; the gist says how the episode felt, and a change of heart is ordinary supersession that restates both; impressions are the character's own observations (ADR-D-0030, ADR-D-0033)
 the scene as perceived  only the time is required; descriptions, keys where they exist, perception labels; never resolved by the application (ADR-D-0029)
 presence accounting   scene boundaries report presence; every present span is covered by its trace and then by a durable account, and only a span with neither is absent; an out-of-band purge is outside this guarantee (ADR-D-0027)
@@ -1416,6 +1425,7 @@ commitments and instructions are written with stability that keeps them from fad
 "forget it" defaults to remembering the request; suppression is chosen only when wording and relationship warrant it
 a request to reprocess an old scene works only while its trace is held or the application kept the source
 ADR-D-0015 stays in force; ADR-I-0013 stays in force, and inference lives behind the completion port
+time counted in experience (philosophy 8.3): decided at this phase's planning from a cost reading over the trace store; in v0.3 if it is cheap there, otherwise the first named item of v0.4; time stays the clock in v0.2
 ```
 
 ## Open discussion
@@ -1435,64 +1445,72 @@ A quiet present span has a durable account, an absent span has none, and recall 
 A trait from one episode, state from a non-literal observation, and a commitment from a claim about the character each fail validation; a hostile line produces no unsupported memory.
 Names and references in trace become notions and beliefs about them: a reference reflection takes to be someone already known attaches to that notion, one it does not forms a new notion, and sameness between notions is a belief with evidence that a later reflection can supersede; nothing is merged.
 A backlog is consolidated in order, and a later reflection can supersede an earlier one's conclusion.
-The phase is judged on benchmark results obtained through mechanical writes plus reflection rather than hand-authored ingestion, and on the behavioral tier's first results; the harness work that produces them is planned in the evaluation repository.
+Every observation and every memory reflection writes from it says whether the character witnessed what it records or was told it, with the basis of that attribution; the catalog's second-hand knowledge and being told about yourself (C3, C5) pass at the retrieval tier.
+Reflection aggregates, from the episodes' own accounts, a disposition toward a thing with its felt tone, with the episodes it rests on reachable.
+Reflection writes the state the character carries, the residue of what just happened and how things have been lately, so that a heavy week reaches a scene with unrelated people.
+What lasts follows surprise: what broke with expectation is kept, and the ordinary merges into gist with each occasion still findable.
+A tendency is held with the situations it was seen in and its counterexamples, and a tendency without its situations is not written.
+The character's own sayings are evidence of their own kind: a story told five times is held as retellings, apart from what was witnessed and what was told.
+Compression keeps the peak and the ending, the cause and the central people, in full, and sends the surroundings to gist; a tense talk that ended warmly is remembered as warm.
+The phase is judged by the two-characters reading against the same model with the whole transcript in context, on benchmark results obtained through mechanical writes plus reflection rather than hand-authored ingestion, and on the behavioral tier's first results; the harness work that produces them is planned in the evaluation repository.
 The guide page on when to write and when to reflect exists, and the example loop uses both.
 ```
 
 ---
 
-# 15. v0.4: temporal validity, attribution, and entity evolution
+# 15. v0.4: what the character holds about the world over time
 
-Detailed draft: [`v0_4_temporal_validity_attribution_entity_evolution.md`](roadmap-phases/v0_4_temporal_validity_attribution_entity_evolution.md)
+Detailed draft: [`v0_4_temporal_validity_attribution_entity_evolution.md`](roadmap-phases/v0_4_temporal_validity_attribution_entity_evolution.md) (the file keeps its earlier name, since records cite it)
 
 ## Intent
 
-Give memories a validity in time, a source, and a history of the entities they concern, without introducing a belief ontology. This is the earlier factual-rigor phase narrowed to the parts with builder-visible value.
+What the character holds about the world over time: a belief has a span in which it held, a person or place has had other names and roles, the character knows who else knows a thing, and it holds its own belief about how far a source can be relied on. All of it is the character's own belief built from experience, held as ordinary interpreted memory with its evidence (philosophy 8.2, ADR-D-0028); none of it is a verdict on what is true.
 
 ## In scope
 
 ```text
-validity intervals and volatility on derived memories: valid from, valid until, review after
-attribution: who asserted a memory and whether the character was there when it happened, on observations and derived memories, completing the scene; who-said-it on reflection outputs already arrives in v0.3 (ADR-D-0028)
-entity aliases, roles, and relationships over time, without destructive overwrite
-current-belief filtering as currency: a derived memory past the validity interval recorded when it was written is not current under invariant 2.15 and stays recallable; staleness without an interval is reported as age, never enforced
-source reliability as derived memories about the source, scoped by domain, never a global score
+time counted in experience, as the first item, if v0.3's planning found it not cheap over the trace store (section 14)
+validity intervals on what the character believes: from when and until when a belief held, recorded when it was written or restated; a belief past its interval leaves current views under invariant 2.15 and stays recallable; staleness without an interval is reported as age, never enforced
+aliases and roles over time: that a notion was called one thing and then another, held one role or relationship and then another, as beliefs with intervals (ADR-D-0034, ADR-D-0035), without destructive overwrite
+who else knows: built from the scenes the character holds, who was present when something was said and who it was told to; recall reports it with the memory and passes no verdict on who may hear what (philosophy 8.5)
+source reliability as the character's own belief about a source, built from its experience of that source being borne out or contradicted, scoped to the matters it concerns, never a global score and never a number (ADR-D-0030)
 ```
 
-## Demand-conditional, behind ADR-D-0005's revisit clause
+Attribution's core, whether the character witnessed a thing or was told it, is v0.3's (section 14); this phase builds on it.
+
+## Not in v0.4, and no longer on the roadmap
 
 ```text
-Assertion, Claim, EvidenceLink, BeliefAssessment, SourceAssessment as first-class objects
-a normalized belief ontology and contradiction machinery
+the first-class fact-acceptance objects, Assertion, Claim, EvidenceLink, BeliefAssessment, SourceAssessment, with stance and confidence, and the belief ontology and contradiction machinery around them: removed from the roadmap rather than kept conditional, because the question they answer, whether a claim is true, is not this library's; memory is subjective and says only what the character's experience has built toward believing (philosophy 8.2); ADR-D-0005 deferred them, and the outcome of its revisit is accepted as ADR-D-0040
 ```
 
-These enter only when measured use shows corrections and contradictions frequent enough that derived subtypes no longer carry them.
+The assertions of ADR-D-0035, the mechanical commitments an ordinary belief carries, are not these objects and stay.
 
 ## Acceptance criteria
 
 ```text
-A derived memory can carry a validity interval, and an expired one is omitted from current views with that reason and remains recallable.
-Every observation and derived memory reports who asserted it and whether it was firsthand or told.
-The system can represent that an entity had one name, role, or relationship during one interval and another later.
-Hearsay and being-told-about-yourself scenarios (catalog C3, C5) pass at the retrieval tier.
+A belief can carry the span in which it held, and one past its span is omitted from current views with that reason and remains recallable.
+The character can hold that a notion had one name, role, or relationship during one interval and another later, and recall reads the one current at the reference time.
+Asked who else knows a thing, the character answers from the scenes it holds, and the answer names what it rests on.
+The character's belief about a source is held with the experiences that formed it, concerns stated matters, and changes only by supersession.
 Corrections and supersession remain provenance-preserving.
 ```
 
 ---
 
-# 16. v0.5: long-horizon shape
+# 16. v0.5: the long horizon proper
 
 Detailed draft: [`v0_5_long_horizon_shape_and_associative_recall.md`](roadmap-phases/v0_5_long_horizon_shape_and_associative_recall.md)
 
 ## Intent
 
-Keep a memory that accumulates for years usable and human-comparable without losing anything: currency at scale, consolidation of periphery into gist with provenance, and query-time associative recall. Decay is not a mechanism (ADR-D-0018); bounded context comes from ranking, consolidation, and currency.
+Keep a memory that accumulates for a decade usable and human-comparable without losing anything: a decade of gists, recognition of a returning stranger, query-time associative activation, and durable associative units only on measured demand. Decay is not a mechanism and there is no reinforce operation (ADR-D-0018); bounded context comes from ranking, consolidation, and currency.
 
 ## In scope
 
 ```text
-currency at scale: relationships that ended, threads that resolved, signals no longer reinforced leave current views and stay recallable
-consolidation: periphery summarized into gist as derived memories with provenance, through the generation port
+currency at scale: relationships that ended, threads that resolved, signals no new evidence supports leave current views and stay recallable
+a decade of gists: the long-horizon consolidation of periphery into gist as derived memories with provenance, through the generation port, keeping what v0.3's compression keeps (peak and ending, cause and central people) and leaving each occasion findable; v0.3's episode and day gists are its input and stay there
 query-time associative activation over the existing graph, bounded by selectivity, with no persisted structure
 recognition and familiarity derived from evidence: a returning stranger is recognized where a person would not
 involuntary recall from weak partial cues (catalog D12), low precision and low cost when wrong
@@ -1680,12 +1698,11 @@ let snapshot = memory.reflection_signal(&scene).await?; // optional: the same si
 
 ## v0.4 API additions
 
-Illustrative shape; validity and attribution are fields on the existing drafts, and current-belief filtering is currency.
+Illustrative shape; a validity interval is a field on the existing drafts, and current-belief filtering is currency. Attribution's core, witnessed or told, arrives with v0.3's reflection outputs and needs no v0.4 surface.
 
 ```rust
 let draft = DerivedMemoryDraft::new(DerivedType::Claim, text)
-    .valid_from(when)
-    .asserted_by(source_entity_id, Attribution::Told);
+    .valid_from(when);
 ```
 
 ## v0.5 API additions
@@ -1743,7 +1760,7 @@ graph-internal associative units
 member-level association lifecycle
 association support evidence
 bounded cluster expansion
-promotion/decay of candidate memberships
+promotion and retirement of candidate memberships by recorded decision, never by elapsed time (ADR-D-0018)
 ```
 
 ## v0.1.3 YAGNI rules

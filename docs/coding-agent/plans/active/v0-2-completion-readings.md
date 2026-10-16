@@ -35,6 +35,56 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
 - Decision Log 2026-10-16, Task_1 root cause and design | covered | internal mechanics.
 - Decision Log 2026-10-16, re-review applied | covered | internal mechanics.
 - Decision Log 2026-10-16, second re-review applied | covered | internal mechanics.
+### v0-2-catalog-roadmap-plan, plan draft (revision 1182deea)
+
+- Goal | covered | brief sections 2 and 3; the v0.2 design waits (preamble and section 4).
+- DoD: catalog carries section 2, whole catalog as guarantees | covered | brief section 2, including its means "written throughout as guarantees on what is in mind and how it is held".
+- DoD: mapping from the notes' philosophy statements to situations | covered | brief section 2 pass condition.
+- DoD: roadmap carries section 3 and no others, familiarity's move open and carried to the amendment | covered | brief section 3 pass condition; section 4 holds work on the choices under review, standing against familiarity among them.
+- DoD: proposed successor to ADR-D-0005's deferral | extends | brief section 3 ("removed from the roadmap rather than kept conditional"); the record is the owner's to accept.
+- DoD: owner accepts catalog and roadmap | covered | brief sections 2 and 3 human-only conditions.
+- Planner-added: mapping table in the report | covered | brief section 2 agent-checkable condition.
+- Planner-added: catalog identifiers stable | extends | brief section 2 adds and amends, nowhere renumbers.
+- Planner-added: roadmap cites new situations by the brief's names | covered | brief section 2 names them.
+- Planner-added: near-neighbours cross-referenced | extends | brief section 2.
+- Planner-added: Task_3 proposed record | extends | brief section 3; record acceptance is the owner's reserved act.
+- Planner-added: stop and report on an unseen record conflict | covered | brief section 1 governance.
+- Non-goals (v0.2 design, familiarity, reading's probes, accepted records, value documents, code and evals, v1.0) | covered | brief preamble, sections 3 and 4.
+- Task_1 | covered | brief section 2.
+- Task_2 | covered | brief sections 3 and 5.
+- Task_3 | extends | brief section 3.
+- Decision Log: ADR-D-0005 ruling | extends | brief section 3.
+- Decision Log: familiarity waits | covered | brief section 4.
+- Decision Log: gist consolidation reading | extends | brief section 3 "move down to the phases that need them".
+- Decision Log: time in experience as a v0.3 planning decision | covered | brief section 3.
+- Decision Log: v0.2 cross-phase pointers follow moves | extends | brief section 3.
+- Decision Log: identifiers stable, names cited | extends | brief section 2.
+- Decision Log: "throughout" as the whole catalog | covered | brief section 2 means.
+- Decision Log: order renderer, reading, re-baseline, paid runs | covered | brief sections 3 and 5.
+- Decision Log: re-review fixes (gists kept, ADR-D-0040, familiarity open, assertions kept apart) | covered | brief sections 3 and 4; ADR-D-0027, ADR-D-0033, ADR-D-0035 unchanged.
+
+- Verdict comparison for the catalog and roadmap plan (2026-10-16), as returned:
+  - Reading compared: Goal agrees (reason rests on a wait the brief says is over); DoD catalog agrees; DoD mapping agrees; DoD roadmap with familiarity open diverges (Orchestrator covered on section 4's hold; auditor inferred, 4a ratified and section 4's wait closed, so the deferral is sequencing); DoD ADR-D-0005 successor agrees; DoD owner acceptance agrees; mapping table agrees; identifiers stable agrees; cites by brief's names diverges (covered; auditor inferred); near-neighbours agrees; Task_3 record agrees; stop and report diverges (covered on section 1; auditor inferred); Non-goals agree except editing accepted records (covered; inferred) and the familiarity clause; Task_1, Task_2, Task_3 agree; DL ADR-D-0005 ruling diverges (Orchestrator extends; auditor cited); DL familiarity waits diverges (covered; inferred); gist, time, pointers, identifiers, "throughout", order agree; re-review fixes agree except the conditional ADR-D-0040 citation (covered; inferred). Design, Integration, Context unread by the Orchestrator.
+  - Findings compared: none found.
+  - Correction inside the run: the familiarity items' reason reworded to name 4a and the unit that carries the move.
+
+### v0-2-catalog-roadmap-plan, closeout
+
+- Catalog revision (failures section, G1 to G13, purpose, variants, guarantees throughout, identifiers stable) | covered | brief section 2 and its means.
+- Roadmap and drafts revision (v0.2 closeout and order; v0.3 measure, intent, six DoD items, attribution's core, time in experience; v0.4 reframed, objects leave; v0.5 long horizon, decay and reinforce leave) | covered | brief sections 3 and 5.
+- v0.4 point-in-time recall line (a reading of validity intervals, also a planning question) | extends | brief section 3's v0.4 sentence.
+- C3/C5 acceptance line moved to v0.3 with attribution's core | extends | brief section 3 "Attribution's core, witnessed or told, moves into v0.3".
+- Volatility, review-after and the confidence view leave v0.4 with the machinery | covered | brief section 3 "with confidence and stance"; ADR-D-0018, ADR-D-0030.
+- Proposed ADR-D-0040 (supersedes ADR-D-0005 whole, subtype decision carried forward) | extends | brief section 3 removal statement; the owner accepts the record.
+- Decay wording in ADR-D-0013, ADR-D-0014 reported, not edited; ADR-D-0040 citations conditional, now resolved | covered | brief section 1 governance.
+- Judgement calls (G8 wording; headings; file names kept) | covered | internal mechanics.
+- Orchestrator rulings (identifiers stable; gists; familiarity to the 4a plan; "throughout"; ADR-D-0005 shape) | covered / extends | as the plan-draft reading.
+- Human-only items pending: the owner accepts the catalog; the roadmap sections; the record | needs the owner | brief sections 2 and 3; a reserved act.
+
+- Verdict comparison for the catalog and roadmap plan, closeout (2026-10-16), as returned:
+  - Reading compared: the catalog line (covered) against the auditor's split: failures, twelve situations, purpose, variants, rewordings agree (cited); the nine departures diverge (covered inside the line; inferred, direction); G10's empty-week departure diverges (covered; ask-now on a conflict); identifiers and cross-references diverge (covered; inferred). The roadmap line (covered): closeout and order, v0.3 measure and gains, pointers, time in experience, v0.4, v0.5 agree (cited); the gist ruling diverges (covered; inferred); familiarity left to 4a unread at closeout. v0.4 point-in-time agrees; C3/C5 agrees; volatility and the confidence view diverge (covered on "with confidence and stance"; inferred on the correction statement and 8.3); ADR-D-0040 diverges in part (extends; cited for the decision, inferred for the full supersession); the handoff agrees; the citation diverges (covered; inferred); G8 diverges (internal; user-facing inferred); headings and file names agree; rulings agree except familiarity (covered; inferred); human-only items agree. Unread by the Orchestrator: the Counsel notes item; the common.md change; that no accepted record changed.
+  - Findings compared: none found under Findings; both means built as written (agrees, cited). Not recorded and compared: G10's departure bears on the design and not recorded (ask-now); the nine-departures list bears on the design and not recorded (inferred, direction); G8's phase wording agrees (inferred).
+  - Correction inside the run: the two unrecorded departures are now findings below; G10 escalated and held; the nine departures journaled as direction for the closeout.
 
 - Verdict comparison (2026-10-16), as returned:
   - Reading compared: Goal unread as an item; DoD 1 agrees; DoD 2 agrees; DoD 3 diverges (Orchestrator extends, philosophy 7.3 and 8.2, held; auditor ask-now, the brief withholds the key and rulings 65 and 70 are not grounds); DoD 4 read covered, recorded not audited (internal); 1 s falsifier diverges (covered as internal; auditor inferred, user-observable latency line); bound in Rust, batched read, timing samples, witness outside the suite, Task_2 witness design consistent (internal); rebuild at open agrees; failed rebuild keeps marker and cause diverges (covered as internal; auditor inferred, developer-visible diagnostics); one key for both paths diverges (covered as internal; auditor ask-now, part of the held key); no public call or setting diverges (covered, "without an operator"; auditor inferred, the brief does not say "without an operator"); Task_3 tie key diverges (extends; ask-now); mid-session limit assumption unread; non-goals agree; integration unread; Task_1 agrees; Task_2 agrees; Task_3 diverges (covered, held; ask-now); DL residuals chosen agrees on scope, the plan-approval waiver unread; DL Task_2 root cause consistent; DL Task_4 key diverges (extends; ask-now); DL drop of the second-person residual agrees on the grade, diverges on the source; DL first review applied diverges (covered as internal; ask-now for its key part); DL runs under the brief agrees; DL Task_1 root cause consistent; DL re-review of 7bf694ff diverges (covered as internal; ask-now for its Task_3 design part); DL second re-review consistent.
@@ -76,4 +126,22 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
   - Findings compared: none found.
   - Correction inside the run: the two parts read as covered are read as extending in later readings.
 
+### v0-2-catalog-roadmap-plan, closeout (second, after the owner's acceptances)
+
+- All items of the first closeout reading | covered | as read there; the owner's acceptances now on disk in the Decision Log ("Mostly good. Situation catalog and roadmap looks fine."; "I accept ADR-D-0040 by name, with the retirement of ADR-D-0005.").
+- G10's departure | covered | the brief's corrected clause (Counsel, 2026-10-16) and philosophy 7.5.
+- The nine departures in the purpose paragraph | extends | philosophy 2.4 and 7.4; the brief's declared departures; journaled as direction.
+- ADR-D-0040 accepted and ADR-D-0005 retired by the procedure | covered | the owner's words; the repository's retirement procedure.
+- The two citation lines of ADR-D-0040 revised at the owner's word | covered | the owner's words ("stripped of references to things like philosophy section numbers").
+- Human-only items | met | the owner's quoted words of 2026-10-16.
+
+- Verdict comparison for the catalog and roadmap plan, second closeout (2026-10-16), as returned:
+  - Reading compared: catalog failures, situations, purpose, variants, rewordings agree; identifiers and cross-references diverge (covered; inferred); G8 diverges (internal; inferred); G10 diverges (covered on the corrected clause and 7.5; inferred on 7.5, 8.3 and the ratified return-after-absence clause, the rewrite no support); nine departures agree (extends; inferred, direction); roadmap items agree; gist diverges (covered; inferred); familiarity diverges (covered; inferred); point-in-time and C3/C5 agree; volatility diverges (covered; inferred); ADR-D-0040 and ADR-D-0005 agree (cited); the full-supersession ruling agrees now; the citation lines diverge (covered; not audited); the handoff agrees; the resolved citation diverges (covered; inferred); human-only items diverge on support only (the plan's record not support; the owner's words settle them). Unread: the G10 ruling as an item; notes for Counsel; common.md; run record, lessons, skill-candidates; ADR-D-0040's post-acceptance wording; the residuals-unit changes.
+  - Findings compared: G10 agrees, bears on the design, inferred, the documents answer it; the nine departures agree, inferred, direction. No departure from a means.
+  - Correction inside the run: later readings cite the ratified clauses, not Counsel's rewrites; the unit closed.
+
 ## Findings
+
+- 2026-10-16, catalog and roadmap plan: G10's first departure reads "empty only for a person" where the brief's clause reads "empty only for the AI"; the brief's reason clause and philosophy 8.3 support the catalog's reading. Reading: bears on the design. Escalated to Counsel as a value question on 2026-10-16; the G10 departure text is held as written until the answer.
+- 2026-10-16, catalog and roadmap plan: the catalog's purpose lists nine departures from human memory where philosophy 2.4 lists five (the four added are grounded in 7.4, 8.3, 10 and the brief). Reading: bears on the design (which departures the product declares). Noted to Counsel on 2026-10-16 with the G10 question; journaled as an inferred call marked direction for the closeout.
+  - 2026-10-16: Counsel corrected the brief's clause (its own error against philosophy 7.5); the catalog stands; the hold is released.

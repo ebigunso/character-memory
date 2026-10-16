@@ -971,6 +971,23 @@ Prevention:
 Evidence:
 - `docs/coding-agent/plans/active/v0-2-residuals-plan.md` Research and Progress Log, 2026-10-15.
 
+## 2026-10-16 - Run the plan validator before a plan goes to review [tags: orchestration, planning, plan-format]
+
+Symptom:
+- The residuals plan went through a plan review and a revision with its validation items in a compressed one-line form, non-sequential task numbers and no planner-added requirements section; `validate_plan.py` rejects all three. It was caught only when the Orchestrator ran the validator before the re-review.
+
+Root cause:
+- The plan was written in a hurry before a usage reset (the 2026-10-15 lesson) and the validator was left to the Reviewer, whose first review did not report its output.
+
+Fix applied:
+- The plan was rewritten into the format (7bf694ff); the dropped task's number went to the held task, with a note naming its old number in the records.
+
+Prevention:
+- The Orchestrator runs `validate_plan.py --mode balanced` on every plan revision before dispatching its review, and a review whose report lacks the validator's output line is returned for it.
+
+Evidence:
+- `docs/coding-agent/plans/active/v0-2-residuals-plan.md`, 2026-10-16 revision.
+
 ## 2026-10-16 - A plan revision re-reads every research input, and a document revision checks who cites it [tags: orchestration, planning, research]
 
 Symptom:
