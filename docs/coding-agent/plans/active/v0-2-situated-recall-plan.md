@@ -301,6 +301,37 @@ Task_2 and Task_4 both touch `src/usecases/retrieve.rs`; the file is split by fu
   - Scenarios: none
 - 2026-10-16: acting on the verdict. The plan waits for the owner's answer on verified absence (Counsel: part 1 with the owner; part 2 below the owner's level, the brief's clause reworded "as of the moment it looked, which it says", committed at 93929a11). The audit's "Findings compared" named a departure as bearing on the design and not recorded: the continuation reaches nothing for a matter- or topic-anchored situation; recorded in the readings file, escalated to Counsel as a value question, and the continuation for those anchors held. Open Questions now name both. Inferred calls journaled: the continuation as the walk's cursor (with its gap); the order-rule experiment (direction). The plan is authorized only when an audit on the owner's answers holds nothing.
 
+- 2026-10-16: plan-draft value audit dispatched at `a0ebbb6b`, text verbatim (paths repository-relative for the committed record): "You are the value auditor. Read references/value-audit-mandate.md of the orchestration-harness skill and follow it exactly. Position: plan draft. Plan: docs/coding-agent/plans/active/v0-2-situated-recall-plan.md. Governing brief: docs/coding-agent/briefs/active/v0-2-completion-brief.md. Changes since: none."
+- 2026-10-16: verdict as returned (comparison lines in the readings file). Position: plan draft. Documents read: the plan; the brief at a0ebbb6b and its diff from a9e0daac; the philosophy; its companion; common.md (pointer lines and Standing Approvals); readings after grading only; notes never opened. Product basis: philosophy. Not audited: the engineering side. Missing inputs: none (the Standing Approvals entry covers who carries the owner's word, no spend, merge or action). Value documents changed in range: none; noted: the brief at that revision differed from its 4a ratification in three Counsel-tagged places with no owner words (the gives 3 continuation bracket; the gives 5 rewording "as of the moment it looked" and its bracket; the section 2 empty-week correction), and the owner's cheapness answer was then on disk only in this plan.
+  - DoD 1, 2, 4 to 10 | brief | cited | 4a gives 1 to 5, means, told constraint, measurement constraint, records paragraph; sections 3, 4; philosophy 7.6, 8.1, 8.5, 9 | -
+  - DoD 3, the cheap branch | brief | cited | 4a gives 5; philosophy 7.6 | -
+  - DoD 3, the conditional form and the not-cheap branch | brief | ask-now | the owner's answer not then in a value document | conditions a told gives-statement on a threshold; value question: must the turn verify whatever the store's size costs, or may a large store leave the turn at nothing found, and who decides when the store is too large? (becomes cited once Counsel records the answer in 4a) | direction
+  - DoD 3, "as of the moment it looked" | brief | ask-now | the ratified wording is "at a stated snapshot"; the rewording is Counsel's inferred text | value question: must the flat no name the point in the record it was checked against, or is "as of when I looked" enough? | direction
+  - Planner-added 1, 3, 5, 8, 9 | brief | cited | 4a gives 1, 2, 3; the constraint; standing tests | -
+  - Planner-added 2 (cut = count plus cursor; topic gatherings promise no continuation of their own) | brief | ask-now | rests on the gives 3 bracket, inferred, no record | value question: when a topic-found situation is cut, does the character get a way to reach the rest, or only what belongs to the people, places and threads found? | direction
+  - Planner-added 4 ("cheap" criterion) | brief | ask-now | as DoD 3's conditional form; the "who decides" part | -
+  - Planner-added 6 (live null shipped) | brief | ask-now | outward-facing, no standing approval; not counted against the Plan Gate; the call waits on the authorization the Orchestrator holds | -
+  - Planner-added 7, 11, 12, 13 | internal mechanics | not audited | - | -
+  - Planner-added 10 (order-rule experiment) | brief | inferred | extends 4a gives 1 and 2; philosophy 8.1 | direction
+  - Non-goals | brief / internal | cited / not audited | 4a; sections 2, 3, 5 | -
+  - Design | brief | cited | 4a gives 1, 2, 3; carries Planner-added 2's ask-now | -
+  - Compatibility: break | brief | cited | 4a "What it replaces" | -
+  - A1 | brief | ask-now | as DoD 3's snapshot line | -
+  - A2 | internal | not audited | - | -
+  - A3 | brief | cited | 4a measurement constraint | -
+  - Task_1, 2, 5, 6, 7 | brief | cited | 4a records paragraph, gives 1 to 5, pass condition; sections 3, 4; philosophy 9 | -
+  - Task_3 | brief | ask-now | the walk cited; the anchor-keyed identifier walk and the cost-decided form carry Planner-added 2 and 4 | direction
+  - Task_4 | brief | ask-now | carries Planner-added 2, 4, 6 and the order rule | direction
+  - Decision Log 1, 4, 5 | brief / internal | cited / not audited | 4a | -
+  - Decision Log 2 | brief | ask-now | as Planner-added 6 | -
+  - Decision Log 3 | brief / internal | ask-now on the continuation and shipped-threshold rulings; the rest cited or not audited | -
+  - Decision Log 6 (continuation closed on Counsel's inference) | brief | ask-now | a product-level decision settled by Counsel's inference, not the owner's word | direction
+  - Decision Log 7 (the owner's answers) | brief | ask-now on the cheapness part (the answer not then in a value document); the run ruling not an item | direction
+  - Human-only conditions pending: the owner's blind reading at closeout (4a); the owner accepts the revised roadmap sections (section 3); the owner accepts the revised catalog (section 2).
+  - Scenarios: none
+  - Summary as returned: every ask-now traces to paperwork, three pieces of the owner's or Counsel's reasoning not in the brief as ratified text; the live null spend does not count against the Plan Gate.
+- 2026-10-16: acting on the verdict. The owner's cheapness answer is now in the brief as a ratified amendment (Counsel, committed at 019be322, merged here), which meets the conditional-form lines. The two inferred clarifications (gives 3's continuation bracket; gives 5's "as of the moment it looked") are sent back to Counsel to bring to the owner for ratification by name, since items that depend on them stay ask-now until the brief carries the owner's words. The plan waits for that relay and is audited again as a revision; no line is changed meanwhile.
+
 ## Decision Log (append-only; re-plans and major discoveries)
 - 2026-10-16 Decision: the plan is one plan with seven tasks, contract before gathering, the walk beside the gathering, the memo and docs after.
   - Trigger / new insight: the owner's amendment (4a) replaces the recall selection and room, the result contract and the renderer as specified, and leaves the storage, time, obligation, resolution, lifecycle, scene, write-turn and notion work standing. The research maps each area.

@@ -191,7 +191,15 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
 - Task_7 | covered | section 3; 4a "What it replaces".
 - Decision Log entries, the owner's answers included | covered | 4a; the owner's quoted words of 2026-10-16.
 
+- Verdict comparison for the situated recall plan, revision with the owner's answer (2026-10-16, at a0ebbb6b), as returned:
+  - Reading compared: Goal unread; DoD 1, 2, 4 to 10 agree; DoD 3 diverges (covered by the owner's answer in the Decision Log and 4a as clarified; auditor: the cheap branch cited, the conditional form and the snapshot wording ask-now, the answer and the clarifications not then in a value document as ratified text); Planner-added 1, 3, 5, 7 to 13 agree (10 with the direction mark); 2 diverges (covered; ask-now on the inferred bracket); 4 diverges (extends; ask-now); 6 diverges (covered; ask-now, not counted against the Plan Gate); Non-goals agree; Design and Compatibility unread; A1 diverges (covered "4a as clarified"; ask-now); A2, A3 agree; Task_1, 2, 5, 6, 7 agree; Task_3 and Task_4 diverge (covered; ask-now carried); Decision Log 1, 4, 5 agree; 2, 3, 6, 7 diverge (covered; ask-now for their lines' reasons).
+  - Findings compared: the continuation finding agrees that it bears on the design, its closure resting on an inferred statement so the item stays ask-now; DoD 4's omitted disposition agrees, cited; the snapshot wording and the conditional form bear on the design and not recorded, ask-now.
+  - Correction inside the run: the two departures are recorded as findings below and sent to Counsel for the owner's ratification by name; the cheapness answer now sits in the brief.
+
 ## Findings
 
 - 2026-10-16, situated recall plan: the walk's cursor, used as a cut situation's continuation, has no key for a situation anchored on an unsettled matter or a topic, so for those anchors "offers to continue" reaches nothing. Reading: bears on the design (the character experiences an empty offer). Escalated to Counsel as a value question on 2026-10-16; the continuation for matter- and topic-anchored situations is held until the owner answers.
   - 2026-10-16: Counsel returned the question as below the owner's level and clarified 4a; the hold is released; the finding is closed by the brief's clarified text.
+
+- 2026-10-16, situated recall plan: 4a's verified-absence statement now reads "as of the moment it looked, which it says" where the ratified words were "at a stated snapshot" (Counsel's inferred clarification). Reading: bears on the design (what the character can say about its flat no). Sent to Counsel for the owner's ratification by name on 2026-10-16; the plan waits.
+- 2026-10-16, situated recall plan: verified absence in the turn conditional on the exhaustive check's cost (the owner's answer). Reading: bears on the design (whether a large store leaves the turn at nothing found). The owner's words now sit in 4a as a ratified amendment (019be322); the next audit grades them there.
