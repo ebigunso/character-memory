@@ -233,6 +233,11 @@ The run's readings file under the v0.2 completion brief (`docs/coding-agent/brie
 - Decision Log: the finding answered from the ratified text; hold released; revision audited before Wave 2 | covered | brief section 1 governance; 4a gives 3.
 - Every other item | as the previous reading (unchanged).
 
+- Verdict comparison for the situated recall plan, post-authorization revision (2026-10-16, at c007569d), as returned:
+  - Reading compared: Planner-added 2 agrees on the grade (the Orchestrator's citation leaned partly on Counsel's correction, which is no support; the ratified sentence alone carries it); Task_4's cut reporting agrees; Decision Log 9 agrees; every item read "as the previous reading" as compared there (the spend items diverge as before; all else agrees).
+  - Findings compared: findings 1 to 3 agree, closed; finding 4 (shared-subject parts unreached from the anchor's cursor) agrees that it bears on the design, closed by this revision. The observation on the continued search's connection is a wording gap, graded cited.
+  - Correction inside the run: the wording applied; later readings cite the ratified sentence, not Counsel's bracket.
+
 ## Findings
 
 - 2026-10-16, situated recall plan: the walk's cursor, used as a cut situation's continuation, has no key for a situation anchored on an unsettled matter or a topic, so for those anchors "offers to continue" reaches nothing. Reading: bears on the design (the character experiences an empty offer). Escalated to Counsel as a value question on 2026-10-16; the continuation for matter- and topic-anchored situations is held until the owner answers.
